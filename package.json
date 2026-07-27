@@ -16,6 +16,21 @@
     "suspense"
   ],
   "license": "MIT",
+  "author": "madisonrubylee <lamantciel@naver.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/madisonrubylee/p9v.git"
+  },
+  "homepage": "https://github.com/madisonrubylee/p9v#readme",
+  "bugs": {
+    "url": "https://github.com/madisonrubylee/p9v/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [
