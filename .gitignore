@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+*.log
+.DS_Store
+.turbo
+.next
+p9v.record.json
+examples/**/node_modules
+examples/**/.next
