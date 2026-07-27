@@ -1,7 +1,7 @@
 "use client";
 
-import { fragment } from "p9v";
-import { useFragment } from "p9v/react";
+import { fragment } from "@p9v/core";
+import { useFragment } from "@p9v/core/react";
 import { userResource } from "../lib/resources";
 import { Card } from "./ui";
 

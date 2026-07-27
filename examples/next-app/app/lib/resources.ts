@@ -1,4 +1,4 @@
-import { defineResource } from "p9v";
+import { defineResource } from "@p9v/core";
 import { apiGet, type Posts, type Stats, type User } from "./api";
 
 export const userResource = defineResource({

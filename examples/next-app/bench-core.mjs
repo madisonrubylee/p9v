@@ -6,7 +6,7 @@
 // Usage: node bench-core.mjs
 
 import { QueryClient, dehydrate } from "@tanstack/react-query";
-import { defineResource } from "p9v";
+import { defineResource } from "@p9v/core";
 
 const DELAY_MS = 400;
 const ROUNDS = Number(process.env.ROUNDS ?? 7);

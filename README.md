@@ -121,7 +121,7 @@ The [example app](./examples/next-app) renders the same screen two ways (user + 
 ## Install
 
 ```bash
-npm install p9v @tanstack/react-query
+npm install @p9v/core @tanstack/react-query
 ```
 
 Requires `react ^18 || ^19` and `@tanstack/react-query ^5`. The friendly
@@ -133,7 +133,7 @@ older React still works, just without the component name.
 **1. Define a resource** — one kind of server data, declared once.
 
 ```ts
-import { defineResource } from "p9v";
+import { defineResource } from "@p9v/core";
 
 export const userResource = defineResource({
   name: "user",
@@ -145,8 +145,8 @@ export const userResource = defineResource({
 **2. Colocate a fragment** — each component declares the fields it reads.
 
 ```tsx
-import { fragment } from "p9v";
-import { useFragment } from "p9v/react";
+import { fragment } from "@p9v/core";
+import { useFragment } from "@p9v/core/react";
 
 const UserCard_user = fragment(userResource, ["id", "name", "avatarUrl"]);
 
@@ -160,7 +160,7 @@ UserCard.fragments = [UserCard_user] as const;
 **3. Declare the route query** — list what to prefetch in parallel.
 
 ```ts
-import { defineRouteQuery } from "p9v";
+import { defineRouteQuery } from "@p9v/core";
 
 export const userPageQuery = defineRouteQuery({
   name: "user-page",
@@ -172,7 +172,7 @@ export const userPageQuery = defineRouteQuery({
 **4. Prefetch at the route** — the server component absorbs the boilerplate.
 
 ```tsx
-import { Prefetch } from "p9v/server";
+import { Prefetch } from "@p9v/core/server";
 
 export default async function Page({ params }) {
   const { id } = await params;
@@ -189,12 +189,12 @@ export default async function Page({ params }) {
 
 | Import | Environment | Contents |
 | --- | --- | --- |
-| `p9v` | server-safe | `defineResource`, `fragment`, `defineRouteQuery`, `P9vWaterfallError`, `createMask`, `captureOwnerStack`, `captureOwnerName`, types |
-| `p9v/react` | client (`"use client"`) | `useFragment`, `P9vProvider`, `RouteQueryProvider` |
-| `p9v/server` | server | `<Prefetch>`, `getServerQueryClient` |
-| `p9v/devtools` | any | `WaterfallRecorder`, `analyzeTimings`, `formatReport` |
+| `@p9v/core` | server-safe | `defineResource`, `fragment`, `defineRouteQuery`, `P9vWaterfallError`, `createMask`, `captureOwnerStack`, `captureOwnerName`, types |
+| `@p9v/core/react` | client (`"use client"`) | `useFragment`, `P9vProvider`, `RouteQueryProvider` |
+| `@p9v/core/server` | server | `<Prefetch>`, `getServerQueryClient` |
+| `@p9v/core/devtools` | any | `WaterfallRecorder`, `analyzeTimings`, `formatReport` |
 
-Split so React Server Components can import `p9v` without pulling client-only
+Split so React Server Components can import `@p9v/core` without pulling client-only
 code (`createContext`, hooks) into the server graph.
 
 ## Diagnose an existing codebase
@@ -204,7 +204,7 @@ tools, `WaterfallRecorder` hangs off the query cache, so it understands queries
 (keys, resources) rather than raw URLs.
 
 ```ts
-import { WaterfallRecorder } from "p9v/devtools";
+import { WaterfallRecorder } from "@p9v/core/devtools";
 
 const recorder = new WaterfallRecorder(queryClient).start();
 // ...exercise the page, then persist recorder.toJSON() to p9v.record.json
@@ -237,7 +237,7 @@ prefetchable instance; `userResource.queryOptions(id)` returns TanStack
 A component's field declaration. `defer: true` marks an intentional waterfall
 (`useFragment` will fetch/suspend instead of throwing).
 
-### `useFragment(fragment, arg)` — from `p9v/react`
+### `useFragment(fragment, arg)` — from `@p9v/core/react`
 Reads the masked, declared fields from the cache. Reactive (re-renders on cache
 changes) but never fetches. On a cache miss it branches:
 
@@ -249,17 +249,17 @@ changes) but never fetches. On a cache miss it branches:
 `root(params)` is the parallel set of resource instances to prefetch. `includes`
 lists the route's components for enforcement and devtools.
 
-### `<Prefetch query params>` — from `p9v/server`
+### `<Prefetch query params>` — from `@p9v/core/server`
 Server component that prefetches `root` in parallel, dehydrates, and hydrates the
 client. Absorbs the `getQueryClient` / `Promise.all(prefetchQuery)` / `dehydrate`
 / `HydrationBoundary` boilerplate.
 
-### `RouteQueryProvider` — from `p9v/react`
+### `RouteQueryProvider` — from `@p9v/core/react`
 Optional, additive client provider. It advertises which resources the active
 route prefetched so a waterfall error can be specific ("route X doesn't prefetch
 Y"). Data still comes from the hydrated cache; you never need it for correctness.
 
-### `WaterfallRecorder` / `analyzeTimings` / `formatReport` — from `p9v/devtools`
+### `WaterfallRecorder` / `analyzeTimings` / `formatReport` — from `@p9v/core/devtools`
 `new WaterfallRecorder(queryClient).start()` records fetch timings off the query
 cache. `recorder.analyze()` returns a report, `recorder.format()` renders the
 ASCII timeline, and `recorder.toJSON()` persists timings for `p9v analyze`.

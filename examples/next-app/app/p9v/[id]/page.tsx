@@ -1,4 +1,4 @@
-import { Prefetch } from "p9v/server";
+import { Prefetch } from "@p9v/core/server";
 import { userPageQuery } from "../../lib/routeQuery";
 import { UserCard } from "../../components/UserCard";
 import { StatsPanel } from "../../components/StatsPanel";

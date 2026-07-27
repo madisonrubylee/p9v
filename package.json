@@ -1,5 +1,5 @@
 {
-  "name": "p9v",
+  "name": "@p9v/core",
   "version": "0.0.1",
   "description": "Prefetch → View. A Relay-style data layer for REST + TanStack Query: fragment colocation, data masking, and prefetch enforcement that makes request waterfalls structurally impossible.",
   "keywords": [

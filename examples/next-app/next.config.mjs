@@ -6,7 +6,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ["p9v"],
+  transpilePackages: ["@p9v/core"],
   outputFileTracingRoot: here,
 };
 

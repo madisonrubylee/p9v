@@ -1,4 +1,4 @@
-import { defineRouteQuery } from "p9v";
+import { defineRouteQuery } from "@p9v/core";
 import { postsResource, statsResource, userResource } from "./resources";
 import { UserCard } from "../components/UserCard";
 import { StatsPanel } from "../components/StatsPanel";
