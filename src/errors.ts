@@ -1,5 +1,41 @@
 import type { Fragment } from "./types.js";
 import type { RouteScope } from "./context.js";
+import type { RouteResourceRequirement } from "./routeQuery.js";
+
+/**
+ * Thrown in development before route prefetching starts when an included
+ * component declares a resource that the route's `root` does not provide.
+ */
+export class P9vRouteConfigError extends Error {
+  readonly routeName: string | undefined;
+  readonly missingResources: readonly RouteResourceRequirement[];
+
+  constructor(args: {
+    routeName: string | undefined;
+    missingResources: readonly RouteResourceRequirement[];
+  }) {
+    const { routeName, missingResources } = args;
+    const routeLabel = routeName ? ` "${routeName}"` : "";
+    const details = missingResources.map(
+      ({ resourceName, fragmentName, componentName }) =>
+        `  - resource "${resourceName}" required by ${componentName} ` +
+        `(fragment "${fragmentName}")`,
+    );
+
+    super(
+      [
+        `[p9v] Route${routeLabel} is missing required prefetches.`,
+        "",
+        ...details,
+        "",
+        "Fix: add each missing resource to defineRouteQuery({ root }).",
+      ].join("\n"),
+    );
+    this.name = "P9vRouteConfigError";
+    this.routeName = routeName;
+    this.missingResources = missingResources;
+  }
+}
 
 /**
  * Thrown (in strict / dev mode) when `useFragment` finds no prefetched data in

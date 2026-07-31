@@ -23,11 +23,16 @@ import type {
  * UserCard.fragments = [UserCard_user] as const;
  * ```
  */
-export function fragment<TArg, TData, const TField extends keyof TData>(
-  resource: Resource<TArg, TData>,
+export function fragment<
+  TArg,
+  TData,
+  const TField extends keyof TData,
+  TName extends string,
+>(
+  resource: Resource<TArg, TData, TName>,
   fields: readonly TField[],
   options: FragmentOptions = {},
-): Fragment<TArg, TData, TField> {
+): Fragment<TArg, TData, TField, TName> {
   return {
     __p9vFragment: true,
     resource,

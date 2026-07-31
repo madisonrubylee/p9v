@@ -19,7 +19,7 @@ function printUsage(): void {
       "                       Defaults to ./p9v.record.json",
       "",
       "Record a session in your app:",
-      "  import { WaterfallRecorder } from 'p9v/devtools';",
+      "  import { WaterfallRecorder } from '@p9v/core/devtools';",
       "  const rec = new WaterfallRecorder(queryClient).start();",
       "  // ...exercise the page, then persist rec.toJSON() to p9v.record.json",
       "",

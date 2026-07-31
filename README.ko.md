@@ -2,11 +2,11 @@
 
 [English](./README.md) | 한국어
 
-**Prefetch → View.** REST와 [TanStack Query](https://tanstack.com/query)를 위한 Relay 스타일 데이터 레이어로, 요청 워터폴(Waterfall)을 나중에 탐지하는 데 그치지 않고 **구조적으로 일어날 수 없게** 만듭니다.
+**Prefetch → View.** REST와 [TanStack Query](https://tanstack.com/query)를 위한 Relay 스타일 데이터 레이어로, 선언된 라우트에서 요청 워터폴(Waterfall)이 다시 생기지 않도록 막아 줍니다.
 
-컴포넌트는 필요한 필드를 스스로 선언합니다. 그러면 타입 시스템이 해당 요구사항을 라우트 단에서 프리페치(Prefetch)하도록 강제합니다. 만약 컴포넌트가 렌더링될 때 필요한 데이터가 없다면, 그게 바로 워터폴입니다. p9v는 이를 조용히 클라이언트 페칭으로 넘기는 대신 **명확한 에러**로 드러냅니다.
+컴포넌트는 필요한 필드를 스스로 선언합니다. `includes`에 선언된 컴포넌트의 리소스가 라우트 `root`에서 빠지면 타입 오류와 개발 환경 검증 오류가 발생합니다. 같은 리소스라도 실제 query key의 데이터가 없다면 `useFragment`가 명확한 워터폴 오류로 드러냅니다.
 
-````tsx
+```tsx
 // 1. Define a resource once
 export const userResource = defineResource({
   name: "user",
@@ -35,12 +35,13 @@ export const userPageQuery = defineRouteQuery({
 export default async function Page({ params }) {
   const { id } = await params;
   return (
-    <Prefetch id params="{{" query="{userPageQuery}" }}>
-      <UserCard userId="{id}"/>
-      <StatsPanel userId="{id}"/>
+    <Prefetch query={userPageQuery} params={{ id }}>
+      <UserCard userId={id} />
+      <StatsPanel userId={id} />
     </Prefetch>
   );
 }
+```
 
 ## 왜 만들었나?
 
@@ -80,9 +81,9 @@ p9v는 그 동일한 규율(declare / mask / enforce)을 GraphQL, 빌드 단계,
 
 1. **Declare(선언)** — 컴포넌트는 `fragment(resource, [...])`를 통해 필요한 필드를 명시적으로 선언합니다.
 2. **Mask(마스킹)** — 선언한 필드에만 접근할 수 있습니다. fragment에서 필드를 삭제하면, 해당 필드를 암묵적으로 사용하던 코드에서 즉시 에러가 발생합니다. 타입 레벨은 `Pick`으로, 개발 환경 런타임은 `Proxy`로 엄격히 제한합니다.
-3. **Enforce(강제)** — `useFragment`는 절대 데이터를 직접 가져오지(Fetch) 않고, 오직 프리페치된 캐시만 읽습니다. 개발 환경에서 캐시 미스가 발생하면 React 19.1의 owner stack을 활용해 문제가 발생한 컴포넌트 이름을 포함한 `P9vWaterfallError`를 던집니다. 의도적인 워터폴이 필요한 경우 `{ defer: true }` 옵션으로 선택할 수 있습니다.
+3. **Enforce(강제)** — 라우트 정의 시 fragment 리소스 포함 여부를 검사하고, strict 모드의 `useFragment`는 프리페치된 캐시만 읽습니다. 개발 환경에서 정확한 query key의 캐시 미스가 발생하면 React 19.1의 owner stack을 활용해 문제가 발생한 컴포넌트 이름을 포함한 `P9vWaterfallError`를 던집니다. 의도적인 워터폴이 필요한 경우 `{ defer: true }` 옵션으로 선택할 수 있습니다.
 
-`useFragment`가 클라이언트 페칭 대신 캐시만 읽도록 강제되므로, 중첩 컴포넌트에 워터폴이 스며들 수 없습니다. 데이터는 라우트 단계에서 병렬로 프리페치되어 있거나, 아니면 에러가 발생하거나 둘 중 하나입니다.
+개발 환경에서는 데이터가 라우트 단계에서 병렬로 프리페치되어 있거나 명확한 오류가 발생합니다. 프로덕션 non-strict 모드는 서비스 안정성을 위해 기존 fetch fallback을 유지합니다.
 
 ## 동작 방식
 
@@ -96,7 +97,7 @@ flowchart TD
   Client --> UF["useFragment (read-only)"]
   UF -->|hit| Masked[Masked fields]
   UF -->|"miss + strict"| Err[P9vWaterfallError]
-````
+```
 
 `<Prefetch>`는 서버에서 실행되어 라우트의 root 리소스를 병렬로 가져오고, 캐시를 직렬화(dehydrate)하여 클라이언트로 전달합니다. 클라이언트의 `useFragment`는 이 캐시를 오직 읽기 전용으로만 참조합니다. 캐시 히트 시 선언된 필드에 대해 마스킹된 뷰를 반환하고, strict 모드에서 캐시 미스가 발생하면 조용히 새 요청을 시작하는 대신 에러를 발생시킵니다.
 
@@ -114,7 +115,7 @@ p9v (parallel prefetch)       401 ms
 ## 설치
 
 ```bash
-npm install p9v @tanstack/react-query
+npm install @p9v/core @tanstack/react-query
 ```
 
 `react ^18 || ^19` 및 `@tanstack/react-query ^5` 환경을 지원합니다. 워터폴 에러 발생 시 컴포넌트 이름을 정확히 추적하는 기능은 React 19.1+의 owner stack(개발 환경 전용)을 활용합니다. 이전 버전의 React에서도 컴포넌트 이름 표시만 제외되고 동일하게 정상 작동합니다.
@@ -126,7 +127,7 @@ npm install p9v @tanstack/react-query
 서버 데이터 타입을 한 곳에서 한 번만 정의합니다.
 
 ```ts
-import { defineResource } from "p9v";
+import { defineResource } from "@p9v/core";
 
 export const userResource = defineResource({
   name: "user",
@@ -135,13 +136,15 @@ export const userResource = defineResource({
 });
 ```
 
+리소스 이름은 애플리케이션 안에서 고유해야 합니다. p9v는 이 이름을 문자열 리터럴 타입으로 보존해 fragment 요구사항과 route prefetch를 연결합니다.
+
 ### 2. fragment 콜로케이션
 
 각 컴포넌트에서 실제로 사용할 필드만 선언합니다.
 
 ```tsx
-import { fragment } from "p9v";
-import { useFragment } from "p9v/react";
+import { fragment } from "@p9v/core";
+import { useFragment } from "@p9v/core/react";
 
 const UserCard_user = fragment(userResource, ["id", "name", "avatarUrl"]);
 
@@ -157,7 +160,7 @@ UserCard.fragments = [UserCard_user] as const;
 라우트 단위에서 병렬로 프리페치할 리소스들을 지정합니다.
 
 ```ts
-import { defineRouteQuery } from "p9v";
+import { defineRouteQuery } from "@p9v/core";
 
 export const userPageQuery = defineRouteQuery({
   name: "user-page",
@@ -166,12 +169,14 @@ export const userPageQuery = defineRouteQuery({
 });
 ```
 
+`includes`에 나열한 컴포넌트의 fragment 리소스가 `root`에 없으면 TypeScript 오류가 발생합니다. 개발 환경의 `<Prefetch>`도 JavaScript나 `any`로 작성된 구성에서 같은 누락을 다시 검사합니다.
+
 ### 4. 라우트에서 프리페치
 
 서버 컴포넌트가 반복적인 프리페치 처리 로직을 대신 담당해 줍니다.
 
 ```tsx
-import { Prefetch } from "p9v/server";
+import { Prefetch } from "@p9v/core/server";
 
 export default async function Page({ params }) {
   const { id } = await params;
@@ -188,19 +193,19 @@ export default async function Page({ params }) {
 
 | Import         | 실행 환경                   | 내용                                                                                                                                    |
 | -------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `p9v`          | 서버 안전(server-safe)      | `defineResource`, `fragment`, `defineRouteQuery`, `P9vWaterfallError`, `createMask`, `captureOwnerStack`, `captureOwnerName`, 타입 정의 |
-| `p9v/react`    | 클라이언트 (`"use client"`) | `useFragment`, `P9vProvider`, `RouteQueryProvider`                                                                                      |
-| `p9v/server`   | 서버                        | `<Prefetch>`, `getServerQueryClient`                                                                                                    |
-| `p9v/devtools` | 모든 환경                   | `WaterfallRecorder`, `analyzeTimings`, `formatReport`                                                                                   |
+| `@p9v/core`          | 서버 안전(server-safe)      | `defineResource`, `fragment`, `defineRouteQuery`, `P9vRouteConfigError`, `P9vWaterfallError`, 타입 정의 |
+| `@p9v/core/react`    | 클라이언트 (`"use client"`) | `useFragment`, `P9vProvider`, `RouteQueryProvider`                                              |
+| `@p9v/core/server`   | 서버                        | `<Prefetch>`, `getServerQueryClient`                                                            |
+| `@p9v/core/devtools` | 모든 환경                   | `WaterfallRecorder`, `analyzeTimings`, `formatReport`                                           |
 
-React Server Component(RSC)가 클라이언트 전용 코드(`createContext`, Custom Hook 등)를 서버 컴포넌트 그래프로 끌어들이지 않고도 `p9v`를 import할 수 있도록 진입점이 분리되어 있습니다.
+React Server Component(RSC)가 클라이언트 전용 코드(`createContext`, Custom Hook 등)를 서버 컴포넌트 그래프로 끌어들이지 않고도 `@p9v/core`를 import할 수 있도록 진입점이 분리되어 있습니다.
 
 ## 기존 코드베이스 진단
 
 p9v를 본격적으로 도입하기 전에 현재 애플리케이션의 어느 부분에서 워터폴이 발생하는지 진단할 수 있습니다. 단순 네트워크 탭 기반 측정 도구와 달리 `WaterfallRecorder`는 React Query의 쿼리 캐시에 직접 바인딩되어 단순 URL이 아닌 쿼리(Key, Resource) 단위로 워터폴을 분석합니다.
 
 ```ts
-import { WaterfallRecorder } from "p9v/devtools";
+import { WaterfallRecorder } from "@p9v/core/devtools";
 
 const recorder = new WaterfallRecorder(queryClient).start();
 // ... 페이지를 조작한 후, 측정 결과를 저장하거나 출력합니다.
@@ -235,9 +240,9 @@ npx p9v analyze # ./p9v.record.json 분석 실행
 
 컴포넌트가 사용할 필드를 선언합니다. `{ defer: true }`를 설정하면 의도적인 워터폴을 허용합니다. 에러를 던지는 대신 `useFragment`가 데이터를 페칭하고 Suspense 상태로 진입합니다.
 
-### `useFragment(fragment, arg)` — `p9v/react`에서 제공
+### `useFragment(fragment, arg)` — `@p9v/core/react`에서 제공
 
-캐시에서 마스킹된 선언 필드를 참조합니다. 반응형으로 동작하며(캐시 업데이트 시 리렌더링) 스스로 네트워크 페칭을 수행하지 않습니다. 캐시 미스 발생 시 다음과 같이 처리됩니다.
+캐시에서 마스킹된 선언 필드를 참조합니다. 반응형으로 동작하며(캐시 업데이트 시 리렌더링), strict 모드에서는 스스로 네트워크 페칭을 수행하지 않습니다. 캐시 미스 발생 시 다음과 같이 처리됩니다.
 
 - deferred fragment → 데이터를 페칭하며 Suspense를 일으킵니다(의도된 워터폴).
 - strict 모드(개발 환경 기본값) → 문제가 발생한 컴포넌트 이름과 함께 `P9vWaterfallError`를 던집니다.
@@ -245,23 +250,23 @@ npx p9v analyze # ./p9v.record.json 분석 실행
 
 ### `defineRouteQuery({ root, includes?, name? })`
 
-`root(params)`는 프리페치할 리소스 인스턴스들의 병렬 집합을 정의합니다. `includes`는 검사 및 devtools 추적을 위해 라우트에 포함될 컴포넌트 목록을 나열합니다.
+`root(params)`는 프리페치할 리소스 인스턴스들의 병렬 집합을 정의합니다. `includes`는 검사 및 devtools 추적을 위해 라우트에 포함될 컴포넌트 목록을 나열합니다. TypeScript는 `includes`의 fragment 리소스가 `root`에 모두 포함되는지 검사합니다.
 
-### `<Prefetch query params>` — `p9v/server`에서 제공
+### `<Prefetch query params>` — `@p9v/core/server`에서 제공
 
 root 리소스를 병렬로 프리페치하고 직렬화(dehydrate)하여 클라이언트에 주입하는 서버 컴포넌트입니다. `getQueryClient`, `Promise.all(prefetchQuery)`, `dehydrate`, `HydrationBoundary`로 이어지는 반복적인 작성 과정을 단축해 줍니다.
 
-### `RouteQueryProvider` — `p9v/react`에서 제공
+### `RouteQueryProvider` — `@p9v/core/react`에서 제공
 
 선택적으로 사용하는 클라이언트 프로바이더입니다. 현재 활성화된 라우트에서 어떤 리소스가 프리페치되었는지 인지하여, 워터폴 에러 발생 시 명확한 메시지("Route X에서 Y를 프리페치하지 않았습니다")를 제공합니다. 데이터는 여전히 하이드레이트된 캐시에서 오며, 정확성을 위해 필수인 것은 아닙니다.
 
-### `WaterfallRecorder` / `analyzeTimings` / `formatReport` — `p9v/devtools`에서 제공
+### `WaterfallRecorder` / `analyzeTimings` / `formatReport` — `@p9v/core/devtools`에서 제공
 
 `new WaterfallRecorder(queryClient).start()`는 쿼리 캐시에 연결되어 페치 타임라인을 기록합니다. `recorder.analyze()`는 분석 리포트를 반환하고, `recorder.format()`은 ASCII 형식의 타임라인 그래프를 출력하며, `recorder.toJSON()`은 `p9v analyze` CLI에서 사용할 타임라인 데이터를 저장합니다.
 
 ## Strict 모드
 
-p9v는 기본적으로 개발 환경에서는 strict(캐시 미스 시 에러), 프로덕션에서는 non-strict(캐시 미스 시 페치로 Fallback)로 동작합니다. 이 기본값은 `process.env.NODE_ENV`를 따릅니다. 덕분에 개발 중에는 강제 검사를 통해 워터폴을 엄격히 방지하고, 배포 환경에서는 안전성을 보장합니다. 필요 시 `<P9vProvider strict={...}>`로 특정 서브트리에 대해 재정의할 수 있습니다.
+p9v는 개발 환경에서 route resource 누락 시 `<Prefetch>`에서 `P9vRouteConfigError`를 던지고, 정확한 query key의 캐시 미스 시 `P9vWaterfallError`를 던집니다. 프로덕션에서는 non-strict fetch fallback으로 동작합니다. 이 기본값은 `process.env.NODE_ENV`를 따르며, 필요 시 `<P9vProvider strict={...}>`로 특정 서브트리에 대해 재정의할 수 있습니다.
 
 마스킹 기능 역시 동일한 메커니즘을 따릅니다. 필드 접근을 제한하는 `Proxy`는 개발 환경에서만 동작하며, 프로덕션에서는 `createMask`가 원본 객체를 그대로 반환하므로 마스킹으로 인한 런타임 오버헤드가 전혀 발생하지 않습니다.
 

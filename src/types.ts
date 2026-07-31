@@ -5,9 +5,9 @@ import type { FetchQueryOptions, QueryKey } from "@tanstack/react-query";
  * server data. It is defined once and referenced from every fragment that needs
  * it. See {@link defineResource}.
  */
-export interface ResourceConfig<TArg, TData> {
+export interface ResourceConfig<TArg, TData, TName extends string = string> {
   /** Stable, human-readable name used in query keys, errors, and devtools. */
-  name: string;
+  name: TName;
   /** Builds the TanStack Query key for a given argument. */
   key: (arg: TArg) => QueryKey;
   /** Fetches the data for a given argument. */
@@ -22,9 +22,12 @@ export interface ResourceConfig<TArg, TData> {
  * A concrete, argument-bound instance of a resource. This is what gets
  * prefetched on the server. Produced by calling a {@link Resource}.
  */
-export interface ResourceInstance<TData = unknown> {
+export interface ResourceInstance<
+  TData = unknown,
+  TName extends string = string,
+> {
   readonly __p9vResourceInstance: true;
-  readonly resourceName: string;
+  readonly resourceName: TName;
   readonly queryKey: QueryKey;
   readonly queryOptions: FetchQueryOptions<TData>;
 }
@@ -34,9 +37,13 @@ export interface ResourceInstance<TData = unknown> {
  * an argument yields a {@link ResourceInstance} — and also carries the raw
  * config for building fragments, query options, and keys.
  */
-export interface Resource<TArg, TData> {
-  (arg: TArg): ResourceInstance<TData>;
-  readonly resourceName: string;
+export interface Resource<
+  TArg,
+  TData,
+  TName extends string = string,
+> {
+  (arg: TArg): ResourceInstance<TData, TName>;
+  readonly resourceName: TName;
   readonly key: (arg: TArg) => QueryKey;
   readonly fetch: (arg: TArg, ctx: { signal?: AbortSignal }) => Promise<TData>;
   readonly queryOptions: (arg: TArg) => FetchQueryOptions<TData>;
@@ -49,9 +56,14 @@ export interface Resource<TArg, TData> {
  * resource it needs. The declared field list drives both the compile-time type
  * (via `Pick`) and the dev-time runtime mask. See {@link fragment}.
  */
-export interface Fragment<TArg, TData, TField extends keyof TData> {
+export interface Fragment<
+  TArg,
+  TData,
+  TField extends keyof TData,
+  TName extends string = string,
+> {
   readonly __p9vFragment: true;
-  readonly resource: Resource<TArg, TData>;
+  readonly resource: Resource<TArg, TData, TName>;
   readonly fields: readonly TField[];
   /** Debug name shown in masking errors; defaults to the resource name. */
   readonly name: string;
@@ -75,8 +87,15 @@ export interface FragmentOptions {
 }
 
 /** A component that declares the fragments it (and its subtree) depend on. */
-export interface RouteComponent {
-  readonly fragments?: readonly Fragment<any, any, any>[];
+export interface RouteComponent<
+  TFragments extends readonly Fragment<any, any, any, any>[] = readonly Fragment<
+    any,
+    any,
+    any,
+    any
+  >[],
+> {
+  readonly fragments?: TFragments;
   readonly displayName?: string;
   readonly name?: string;
 }

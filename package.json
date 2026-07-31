@@ -1,7 +1,7 @@
 {
   "name": "@p9v/core",
-  "version": "0.0.1",
-  "description": "Prefetch → View. A Relay-style data layer for REST + TanStack Query: fragment colocation, data masking, and prefetch enforcement that makes request waterfalls structurally impossible.",
+  "version": "0.1.0",
+  "description": "Prefetch → View. A Relay-style data layer for REST + TanStack Query with fragment colocation, data masking, and route prefetch enforcement.",
   "keywords": [
     "react",
     "nextjs",
@@ -85,8 +85,9 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:package": "node scripts/package-smoke.mjs",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "pnpm build"
+    "prepack": "pnpm build"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5",

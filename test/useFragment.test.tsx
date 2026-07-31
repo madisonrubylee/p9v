@@ -6,6 +6,8 @@ import { fragment } from "../src/fragment.js";
 import { useFragment } from "../src/useFragment.js";
 import { P9vProvider } from "../src/context.js";
 import { P9vWaterfallError } from "../src/errors.js";
+import { defineRouteQuery } from "../src/routeQuery.js";
+import { RouteQueryProvider } from "../src/RouteQueryProvider.js";
 import { makeClient, USER_FIXTURE, withClient, type User } from "./helpers.js";
 
 const userResource = defineResource({
@@ -20,6 +22,7 @@ function UserCard({ id }: { id: string }) {
   const user = useFragment(cardFragment, id);
   return <div data-testid="name">{user.name}</div>;
 }
+UserCard.fragments = [cardFragment] as const;
 
 describe("useFragment", () => {
   it("reads prefetched data from the cache without fetching", () => {
@@ -75,6 +78,52 @@ describe("useFragment", () => {
 
     expect(caught).toBeInstanceOf(P9vWaterfallError);
     expect((caught as P9vWaterfallError).resourceName).toBe("user");
+    spy.mockRestore();
+  });
+
+  it("detects a different query key for an otherwise prefetched resource", () => {
+    const client = makeClient();
+    client.setQueryData(["user", "u1"], USER_FIXTURE);
+    const query = defineRouteQuery({
+      name: "user-page",
+      root: ({ id }: { id: string }) => [userResource(id)],
+      includes: [UserCard],
+    });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let caught: unknown;
+    class Boundary extends React.Component<
+      { children: React.ReactNode },
+      { error: unknown }
+    > {
+      state = { error: null as unknown };
+      static getDerivedStateFromError(error: unknown) {
+        return { error };
+      }
+      componentDidCatch(error: unknown) {
+        caught = error;
+      }
+      render() {
+        return this.state.error ? <span>failed</span> : this.props.children;
+      }
+    }
+
+    render(
+      <P9vProvider strict>
+        <RouteQueryProvider query={query} params={{ id: "u1" }}>
+          <Boundary>
+            <UserCard id="u2" />
+          </Boundary>
+        </RouteQueryProvider>
+      </P9vProvider>,
+      { wrapper: withClient(client) },
+    );
+
+    expect(caught).toBeInstanceOf(P9vWaterfallError);
+    expect((caught as P9vWaterfallError).queryKey).toEqual(["user", "u2"]);
+    expect((caught as Error).message).not.toContain(
+      'does not prefetch "user"',
+    );
     spy.mockRestore();
   });
 

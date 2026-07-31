@@ -6,6 +6,10 @@ import {
   type DehydratedState,
 } from "@tanstack/react-query";
 import type { RouteQuery } from "../routeQuery.js";
+import { findMissingRouteRequirements } from "../routeQuery.js";
+import { P9vRouteConfigError } from "../errors.js";
+
+const isProd = process.env.NODE_ENV === "production";
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -53,6 +57,18 @@ export async function Prefetch<TParams>(
   const client = getServerQueryClient();
 
   const instances = query.getRootInstances(params);
+  if (!isProd) {
+    const missingResources = findMissingRouteRequirements(
+      instances,
+      query.requiredResources,
+    );
+    if (missingResources.length > 0) {
+      throw new P9vRouteConfigError({
+        routeName: query.name,
+        missingResources,
+      });
+    }
+  }
   await Promise.all(
     instances.map((instance) => client.prefetchQuery(instance.queryOptions)),
   );
@@ -61,7 +77,7 @@ export async function Prefetch<TParams>(
 
   // Only the client-side cache needs hydrating; `useFragment` reads from it.
   // For friendlier waterfall errors ("route X doesn't prefetch Y"), wrap your
-  // client subtree in <RouteQueryProvider> from "p9v/react" — it is optional and
+  // client subtree in <RouteQueryProvider> from "@p9v/core/react" — it is optional and
   // additive, so we don't force a client boundary here.
   return React.createElement(HydrationBoundary, { state }, children);
 }

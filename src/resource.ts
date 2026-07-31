@@ -13,9 +13,9 @@ import type { Resource, ResourceConfig, ResourceInstance } from "./types.js";
  * });
  * ```
  */
-export function defineResource<TArg, TData>(
-  config: ResourceConfig<TArg, TData>,
-): Resource<TArg, TData> {
+export function defineResource<const TName extends string, TArg, TData>(
+  config: ResourceConfig<TArg, TData, TName>,
+): Resource<TArg, TData, TName> {
   const queryOptions = (arg: TArg): FetchQueryOptions<TData> => {
     const options: FetchQueryOptions<TData> = {
       queryKey: config.key(arg),
@@ -26,7 +26,7 @@ export function defineResource<TArg, TData>(
     return options;
   };
 
-  const resource = ((arg: TArg): ResourceInstance<TData> => {
+  const resource = ((arg: TArg): ResourceInstance<TData, TName> => {
     const options = queryOptions(arg);
     return {
       __p9vResourceInstance: true,
@@ -34,7 +34,7 @@ export function defineResource<TArg, TData>(
       queryKey: options.queryKey as QueryKey,
       queryOptions: options,
     };
-  }) as Resource<TArg, TData>;
+  }) as Resource<TArg, TData, TName>;
 
   Object.assign(resource, {
     resourceName: config.name,

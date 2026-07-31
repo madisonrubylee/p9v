@@ -25,19 +25,40 @@ const TeamBadge: RouteComponent = Object.assign(() => null, {
 describe("defineRouteQuery", () => {
   const pageQuery = defineRouteQuery({
     name: "user-page",
-    root: (params: { id: string }) => [userResource(params.id)],
+    root: (params: { id: string }) => [
+      userResource(params.id),
+      teamResource("t1"),
+    ],
     includes: [UserCard, TeamBadge],
   });
 
   it("returns root instances to prefetch in parallel", () => {
     const instances = pageQuery.getRootInstances({ id: "u1" });
-    expect(instances).toHaveLength(1);
+    expect(instances).toHaveLength(2);
     expect(instances[0]!.queryKey).toEqual(["user", "u1"]);
   });
 
   it("collects resource names from root and included fragments", () => {
     const names = pageQuery.getResourceNames({ id: "u1" });
     expect(names).toEqual(new Set(["user", "team"]));
+  });
+
+  it("separates prefetched resources from component requirements", () => {
+    expect(pageQuery.getPrefetchedResourceNames({ id: "u1" })).toEqual(
+      new Set(["user", "team"]),
+    );
+    expect(pageQuery.requiredResources).toEqual([
+      {
+        componentName: "<anonymous>",
+        fragmentName: "user",
+        resourceName: "user",
+      },
+      {
+        componentName: "<anonymous>",
+        fragmentName: "team",
+        resourceName: "team",
+      },
+    ]);
   });
 
   it("exposes name and includes", () => {

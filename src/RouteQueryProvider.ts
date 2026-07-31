@@ -16,7 +16,7 @@ export function RouteQueryProvider<TParams>(props: {
 
   const scope = React.useMemo<RouteScope>(
     () => ({
-      resourceNames: query.getResourceNames(params),
+      resourceNames: query.getPrefetchedResourceNames(params),
       components: query.includes,
       routeName: query.name,
     }),

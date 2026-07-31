@@ -23,8 +23,13 @@ import { P9vWaterfallError } from "./errors.js";
  *   offending component via React's owner stack;
  * - non-strict (prod)  → it suspends and fetches as a safe fallback.
  */
-export function useFragment<TArg, TData, TField extends keyof TData>(
-  frag: Fragment<TArg, TData, TField>,
+export function useFragment<
+  TArg,
+  TData,
+  TField extends keyof TData,
+  TName extends string,
+>(
+  frag: Fragment<TArg, TData, TField, TName>,
   arg: TArg,
 ): Pick<TData, TField> {
   const client = useQueryClient();

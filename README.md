@@ -9,8 +9,10 @@ English | [한국어](./README.ko.md)
 **A Relay-style data layer for REST, TanStack Query, and the Next.js App Router.**
 
 p9v keeps data requirements next to React components while prefetching every
-request in parallel at the route. Undeclared fields become type errors, and
-missing prefetches become clear runtime errors instead of hidden waterfalls.
+request in parallel at the route. Undeclared fields become type errors. When a
+route declares its components through `includes`, missing resource prefetches
+become type errors plus clear development-time errors instead of hidden
+waterfalls.
 
 - **Colocate data requirements** with reusable, type-safe fragments
 - **Prefetch in parallel** with TanStack Query and React Server Components
@@ -48,6 +50,9 @@ export const userResource = defineResource({
   fetch: (id) => api.get<User>(`/users/${id}`),
 });
 ```
+
+Resource names must be unique within an application. p9v preserves each name as
+a string literal type to connect fragments to route prefetches.
 
 ### 2. Declare what a component reads
 
@@ -93,6 +98,10 @@ export default async function Page({ params }) {
 }
 ```
 
+Because `includes` lists `UserCard` and `StatsPanel`, TypeScript verifies that
+their fragment resources are present in `root`. In development, `<Prefetch>`
+repeats this check at runtime for JavaScript callers and code that uses `any`.
+
 `<Prefetch>` fetches the route's resources in parallel on the server, then
 dehydrates and hydrates the TanStack Query cache. `useFragment` reads that cache;
 it never starts an accidental request in development.
@@ -105,18 +114,19 @@ duplicating each component's data requirements.
 
 p9v keeps both benefits:
 
-| Approach                  | Colocated requirements | Parallel fetching |    Prevents waterfalls    |
-| ------------------------- | :--------------------: | :---------------: | :-----------------------: |
-| Fetch inside components   |          Yes           |        No         |            No             |
-| Manual route prefetching  |           No           |        Yes        |            No             |
-| Waterfall detection tools |          Yes           |        No         | No — warns after the fact |
-| **p9v**                   |        **Yes**         |      **Yes**      |          **Yes**          |
+| Approach                  | Colocated requirements | Parallel fetching |      Prevents waterfalls      |
+| ------------------------- | :--------------------: | :---------------: | :---------------------------: |
+| Fetch inside components   |          Yes           |        No         |              No               |
+| Manual route prefetching  |           No           |        Yes        |              No               |
+| Waterfall detection tools |          Yes           |        No         |   No — warns after the fact   |
+| **p9v**                   |        **Yes**         |      **Yes**      | **Yes, for declared routes** |
 
 The model follows three rules:
 
 1. **Declare** fields with `fragment(resource, fields)`.
 2. **Mask** component data to those fields.
-3. **Enforce** route prefetching when `useFragment` reads the cache.
+3. **Enforce** resource coverage at route definition and exact query-key
+   coverage when `useFragment` reads the cache.
 
 This brings Relay-style fragment colocation and data masking to REST APIs and
 TanStack Query—without adopting GraphQL. It directly addresses the prefetching
@@ -160,6 +170,7 @@ in CI.
 | `useFragment(fragment, arg)` | Reactively read prefetched, masked cache data  |
 | `<Prefetch query params>`    | Prefetch, dehydrate, and hydrate route data    |
 | `WaterfallRecorder`          | Record and analyze query timing in development |
+| `P9vRouteConfigError`        | Describe missing route resource prefetches     |
 
 ### Package entry points
 
@@ -172,8 +183,10 @@ in CI.
 
 ## Strict mode
 
-In development, a missing prefetch throws `P9vWaterfallError`. On React 19.1+,
-the error also identifies the responsible component through owner stacks.
+In development, `<Prefetch>` throws `P9vRouteConfigError` before fetching when
+an included component's resource is absent from `root`. A cache miss for an
+exact query key throws `P9vWaterfallError`; on React 19.1+, that error also
+identifies the responsible component through owner stacks.
 
 Production defaults to a safe fetch fallback. To intentionally defer a request,
 set `{ defer: true }` on its fragment. You can override strict behavior for a
