@@ -1,9 +1,5 @@
 <p align="center">
-  <img
-    src="https://raw.githubusercontent.com/madisonrubylee/p9v/main/assets/logo.png"
-    alt="p9v logo"
-    width="640"
-  />
+<img src="./assets/logo.png" alt="p9v logo" width="640" />
 </p>
 
 # p9v — Prevent React Query Request Waterfalls
