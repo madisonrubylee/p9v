@@ -5,6 +5,7 @@ coverage
 .DS_Store
 .turbo
 .next
+.pnpm-store
 p9v.record.json
 examples/**/node_modules
 examples/**/.next
