@@ -3,6 +3,8 @@ import { captureOwnerName } from "../ownerStack.js";
 
 /** One fetch cycle of one query, as observed by the recorder. */
 export interface QueryTiming {
+  /** Stable identifier used to deduplicate hydrated server timings. */
+  id?: string;
   keyHash: string;
   key: QueryKey;
   /** Resource name — the first string segment of the key, when present. */
@@ -12,6 +14,26 @@ export interface QueryTiming {
   startedAt: number;
   settledAt: number | null;
   status: "pending" | "success" | "error";
+  /** Where the observed request ran. Missing on recordings from p9v < 0.2.0. */
+  source?: "server" | "client";
+  /** Requests are analyzed within, never across, a session. */
+  sessionId?: string;
+  /** Route name for p9v server-prefetch sessions. */
+  routeName?: string | null;
+}
+
+export interface RecorderSnapshot {
+  /** Increases whenever timings change. */
+  revision: number;
+  /** Immutable copy suitable for `useSyncExternalStore`. */
+  timings: readonly QueryTiming[];
+}
+
+export interface P9vDevtoolsMeta {
+  readonly version: 1;
+  readonly sessionId: string;
+  readonly routeName: string | null;
+  readonly timings: QueryTiming[];
 }
 
 /** An inferred "B waited for A" dependency between two fetch cycles. */
@@ -45,6 +67,42 @@ export interface RecorderOptions {
 }
 
 const DEFAULT_THRESHOLD_MS = 60;
+const P9V_DEVTOOLS_META_KEY = "__p9vDevtools";
+let clientSessionSequence = 0;
+
+export function createP9vDevtoolsMeta(args: {
+  sessionId: string;
+  routeName: string | null;
+}): P9vDevtoolsMeta {
+  return {
+    version: 1,
+    sessionId: args.sessionId,
+    routeName: args.routeName,
+    timings: [],
+  };
+}
+
+export function withP9vDevtoolsMeta(
+  meta: Record<string, unknown> | undefined,
+  devtoolsMeta: P9vDevtoolsMeta,
+): Record<string, unknown> {
+  return { ...meta, [P9V_DEVTOOLS_META_KEY]: devtoolsMeta };
+}
+
+function readP9vDevtoolsMeta(meta: unknown): P9vDevtoolsMeta | null {
+  if (!meta || typeof meta !== "object") return null;
+  const value = (meta as Record<string, unknown>)[P9V_DEVTOOLS_META_KEY];
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<P9vDevtoolsMeta>;
+  if (
+    candidate.version !== 1 ||
+    typeof candidate.sessionId !== "string" ||
+    !Array.isArray(candidate.timings)
+  ) {
+    return null;
+  }
+  return candidate as P9vDevtoolsMeta;
+}
 
 /**
  * Records TanStack Query fetch timings and reconstructs request waterfalls.
@@ -67,20 +125,31 @@ export class WaterfallRecorder {
   private readonly client: QueryClient;
   private readonly now: () => number;
   private readonly threshold: number;
+  private readonly sessionId: string;
   private readonly timings: QueryTiming[] = [];
   private readonly inFlight = new Map<string, number>(); // keyHash -> timing index
+  private readonly listeners = new Set<() => void>();
+  private readonly seenTimingIds = new Set<string>();
+  private timingSequence = 0;
+  private revision = 0;
+  private snapshot: RecorderSnapshot = { revision: 0, timings: [] };
   private unsubscribe: (() => void) | null = null;
 
   constructor(client: QueryClient, options: RecorderOptions = {}) {
     this.client = client;
     this.now = options.now ?? Date.now;
     this.threshold = options.sequentialThresholdMs ?? DEFAULT_THRESHOLD_MS;
+    this.sessionId = `client:${this.now()}:${++clientSessionSequence}`;
   }
 
   start(): this {
     if (this.unsubscribe) return this;
     const cache = this.client.getQueryCache();
+    this.ingestServerTimings(
+      cache.getAll().map((query) => query.meta),
+    );
     this.unsubscribe = cache.subscribe((event) => {
+      this.ingestServerTimings([event.query.meta]);
       if (event.type !== "updated") return;
       const action = (event as { action?: { type?: string } }).action;
       if (!action) return;
@@ -103,14 +172,28 @@ export class WaterfallRecorder {
   }
 
   clear(): this {
+    for (const timing of this.timings) {
+      if (timing.id) this.seenTimingIds.add(timing.id);
+    }
     this.timings.length = 0;
     this.inFlight.clear();
+    this.publishSnapshot();
     return this;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  getSnapshot(): RecorderSnapshot {
+    return this.snapshot;
   }
 
   private onFetchStart(keyHash: string, key: QueryKey): void {
     const index = this.timings.length;
     this.timings.push({
+      id: `${this.sessionId}:${++this.timingSequence}`,
       keyHash,
       key,
       resource: typeof key[0] === "string" ? key[0] : null,
@@ -118,8 +201,12 @@ export class WaterfallRecorder {
       startedAt: this.now(),
       settledAt: null,
       status: "pending",
+      source: "client",
+      sessionId: this.sessionId,
+      routeName: null,
     });
     this.inFlight.set(keyHash, index);
+    this.publishSnapshot();
   }
 
   private onSettle(keyHash: string, status: "success" | "error"): void {
@@ -131,6 +218,37 @@ export class WaterfallRecorder {
       timing.status = status;
     }
     this.inFlight.delete(keyHash);
+    this.publishSnapshot();
+  }
+
+  private ingestServerTimings(metas: unknown[]): void {
+    let didChange = false;
+    for (const meta of metas) {
+      const devtoolsMeta = readP9vDevtoolsMeta(meta);
+      if (!devtoolsMeta) continue;
+      for (const timing of devtoolsMeta.timings) {
+        const timingId = timing.id;
+        if (!timingId || this.seenTimingIds.has(timingId)) continue;
+        this.seenTimingIds.add(timingId);
+        this.timings.push({
+          ...timing,
+          source: "server",
+          sessionId: devtoolsMeta.sessionId,
+          routeName: devtoolsMeta.routeName,
+        });
+        didChange = true;
+      }
+    }
+    if (didChange) this.publishSnapshot();
+  }
+
+  private publishSnapshot(): void {
+    this.revision += 1;
+    this.snapshot = {
+      revision: this.revision,
+      timings: this.timings.map((timing) => ({ ...timing })),
+    };
+    for (const listener of this.listeners) listener();
   }
 
   getTimings(): QueryTiming[] {

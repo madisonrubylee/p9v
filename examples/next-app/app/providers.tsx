@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { P9vDevtools } from "@p9v/core/devtools/react";
 
 function makeClient() {
   return new QueryClient({
@@ -18,5 +19,10 @@ function getClient() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(getClient);
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <P9vDevtools enabled />
+      {children}
+    </QueryClientProvider>
+  );
 }

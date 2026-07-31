@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0
+
+### Added
+
+- Browser `P9vDevtools` panel for server-prefetch and client TanStack Query timing sessions.
+- Live suspected-waterfall timeline, critical path, query details, Clear, and CLI-compatible JSON copy.
+- Development-only server timing metadata from `<Prefetch>`, with explicit production opt-in.
+- Dedicated `@p9v/core/devtools/react` client entry point and interactive Next.js demo.
+
+### Changed
+
+- `WaterfallRecorder` now exposes stable snapshots and subscriptions for reactive consumers.
+- Query timings can identify their server/client source, session, route, and stable timing ID.
+
+### Compatibility
+
+- Existing `@p9v/core/devtools` recorder, JSON arrays, and CLI analysis remain compatible.
+- General raw RSC `fetch` calls are not instrumented; server timings cover p9v `<Prefetch>` resources.
+
 ## 0.1.0
 
 ### Added

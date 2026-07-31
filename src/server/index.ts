@@ -3,13 +3,21 @@ import {
   QueryClient,
   dehydrate,
   HydrationBoundary,
+  hashKey,
   type DehydratedState,
+  type QueryFunction,
 } from "@tanstack/react-query";
 import type { RouteQuery } from "../routeQuery.js";
 import { findMissingRouteRequirements } from "../routeQuery.js";
 import { P9vRouteConfigError } from "../errors.js";
+import {
+  createP9vDevtoolsMeta,
+  withP9vDevtoolsMeta,
+  type QueryTiming,
+} from "../devtools/index.js";
 
 const isProd = process.env.NODE_ENV === "production";
+let serverSessionSequence = 0;
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -31,6 +39,8 @@ export interface PrefetchProps<TParams> {
   query: RouteQuery<TParams>;
   params: TParams;
   children: React.ReactNode;
+  /** Collect server resource timings for `P9vDevtools`. Defaults to dev-only. */
+  devtools?: boolean;
 }
 
 /**
@@ -54,6 +64,7 @@ export async function Prefetch<TParams>(
   props: PrefetchProps<TParams>,
 ): Promise<React.ReactElement> {
   const { query, params, children } = props;
+  const shouldCollectDevtoolsTimings = props.devtools ?? !isProd;
   const client = getServerQueryClient();
 
   const instances = query.getRootInstances(params);
@@ -69,8 +80,63 @@ export async function Prefetch<TParams>(
       });
     }
   }
+  const sessionId = `server:${Date.now()}:${++serverSessionSequence}`;
+
   await Promise.all(
-    instances.map((instance) => client.prefetchQuery(instance.queryOptions)),
+    instances.map((instance, index) => {
+      if (!shouldCollectDevtoolsTimings) {
+        return client.prefetchQuery(instance.queryOptions);
+      }
+
+      const originalQueryFn = instance.queryOptions.queryFn;
+      if (typeof originalQueryFn !== "function") {
+        return client.prefetchQuery(instance.queryOptions);
+      }
+      const devtoolsMeta = createP9vDevtoolsMeta({
+        sessionId,
+        routeName: query.name ?? null,
+      });
+
+      const instrumentedQueryFn: QueryFunction<unknown> = async (context) => {
+        const startedAt = Date.now();
+        const timing: QueryTiming = {
+          id: `${sessionId}:${index}:${startedAt}`,
+          keyHash: hashKey(instance.queryKey),
+          key: instance.queryKey,
+          resource: instance.resourceName,
+          owner: null,
+          startedAt,
+          settledAt: null,
+          status: "pending",
+          source: "server",
+          sessionId,
+          routeName: query.name ?? null,
+        };
+        devtoolsMeta.timings.push(timing);
+
+        try {
+          const data = await (originalQueryFn as QueryFunction<unknown>)(
+            context,
+          );
+          timing.status = "success";
+          return data;
+        } catch (error) {
+          timing.status = "error";
+          throw error;
+        } finally {
+          timing.settledAt = Date.now();
+        }
+      };
+
+      return client.prefetchQuery({
+        ...instance.queryOptions,
+        queryFn: instrumentedQueryFn,
+        meta: withP9vDevtoolsMeta(
+          instance.queryOptions.meta,
+          devtoolsMeta,
+        ),
+      });
+    }),
   );
 
   const state: DehydratedState = dehydrate(client);

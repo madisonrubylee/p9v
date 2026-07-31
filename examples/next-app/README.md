@@ -9,6 +9,12 @@ built two ways:
 - `/p9v/[id]` — a single `defineRouteQuery` prefetches all three resources **in
   parallel** via `<Prefetch>`; the components read from the hydrated cache with
   `useFragment` and never trigger their own fetches.
+- `/client-waterfall/[id]` — three nested browser-side TanStack Query requests
+used to demonstrate the p9v Devtools suspected-waterfall timeline.
+
+The example explicitly enables both `<P9vDevtools enabled>` and `<Prefetch
+devtools>` so the production build remains demonstrable. Applications should
+keep the development-only defaults unless production diagnostics are intended.
 
 ## Run
 
@@ -18,7 +24,10 @@ pnpm build
 pnpm start          # http://localhost:3100
 ```
 
-Open `/vanilla/u1` and `/p9v/u1` and watch the Network tab.
+Open `/p9v/u1` to see a parallel Server session in the p9v Devtools panel, or
+`/client-waterfall/u1` to see a depth-three Client session. The original
+`/vanilla/u1` route remains a raw RSC fetch benchmark and is intentionally not
+instrumented by the panel.
 
 ## Measure
 

@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import { defineResource } from "../src/resource.js";
 import { fragment } from "../src/fragment.js";
 import { defineRouteQuery } from "../src/routeQuery.js";
 import { Prefetch } from "../src/server/index.js";
+import { getServerQueryClient } from "../src/server/index.js";
 import { P9vRouteConfigError } from "../src/errors.js";
 import type { RouteComponent } from "../src/types.js";
 
@@ -56,6 +58,101 @@ describe("Prefetch route validation", () => {
     expect(fetchUser).not.toHaveBeenCalled();
   });
 
+  it("hydrates parallel p9v server timings and preserves query metadata", async () => {
+    const client = getServerQueryClient();
+    client.clear();
+    const makeResource = (name: "profile" | "stats" | "posts") =>
+      defineResource({
+        name,
+        key: (id: string) => [name, id] as const,
+        fetch: async (id: string) => {
+          await Promise.resolve();
+          return { id };
+        },
+      });
+    const profile = makeResource("profile");
+    const stats = makeResource("stats");
+    const posts = makeResource("posts");
+    const profileInstance = profile("u1");
+    profileInstance.queryOptions.meta = { custom: "preserved" };
+    const query = defineRouteQuery({
+      name: "timed-profile",
+      root: () => [profileInstance, stats("u1"), posts("u1")],
+    });
+
+    const element = await Prefetch({ query, params: undefined, children: null });
+    const state = (element as ReactElement<{ state: unknown }>).props.state as {
+      queries: Array<{ meta?: Record<string, unknown> }>;
+    };
+    const timingMetas = state.queries.map(
+      (dehydratedQuery) => dehydratedQuery.meta?.__p9vDevtools,
+    ) as Array<{
+      sessionId: string;
+      routeName: string;
+      timings: Array<{ status: string; source: string }>;
+    }>;
+
+    expect(timingMetas).toHaveLength(3);
+    expect(new Set(timingMetas.map((meta) => meta.sessionId)).size).toBe(1);
+    expect(timingMetas.every((meta) => meta.routeName === "timed-profile")).toBe(
+      true,
+    );
+    expect(timingMetas.flatMap((meta) => meta.timings)).toHaveLength(3);
+    expect(
+      timingMetas
+        .flatMap((meta) => meta.timings)
+        .every((timing) =>
+          timing.status === "success" && timing.source === "server"
+        ),
+    ).toBe(true);
+    expect(state.queries[0]?.meta?.custom).toBe("preserved");
+  });
+
+  it("records deduplicated fetches once and supports disabling server timings", async () => {
+    const client = getServerQueryClient();
+    client.clear();
+    const resource = defineResource({
+      name: "cached-profile",
+      key: (id: string) => ["cached-profile", id] as const,
+      fetch: async (id: string) => ({ id }),
+      staleTime: 60_000,
+    });
+    const query = defineRouteQuery({
+      root: () => [resource("u1"), resource("u1")],
+    });
+
+    const deduplicatedElement = await Prefetch({
+      query,
+      params: undefined,
+      children: null,
+    });
+    const deduplicatedState = (
+      deduplicatedElement as ReactElement<{ state: unknown }>
+    ).props.state as {
+      queries: Array<{ meta?: Record<string, unknown> }>;
+    };
+    const deduplicatedMeta = deduplicatedState.queries[0]?.meta
+      ?.__p9vDevtools as
+      | { timings: unknown[] }
+      | undefined;
+    expect(deduplicatedState.queries).toHaveLength(1);
+    expect(deduplicatedMeta?.timings ?? []).toHaveLength(1);
+
+    client.clear();
+    const disabledElement = await Prefetch({
+      query,
+      params: undefined,
+      children: null,
+      devtools: false,
+    });
+    const disabledState = (
+      disabledElement as ReactElement<{ state: unknown }>
+    ).props.state as {
+      queries: Array<{ meta?: Record<string, unknown> }>;
+    };
+    expect(disabledState.queries[0]?.meta?.__p9vDevtools).toBeUndefined();
+  });
+
   it("keeps the production fallback instead of rejecting the route", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.resetModules();
@@ -83,14 +180,42 @@ describe("Prefetch route validation", () => {
         includes: [TeamBadge],
       });
 
-      await expect(
-        ProductionPrefetch({
-          query,
-          params: { id: "u1" },
-          children: null,
-        }),
-      ).resolves.toBeTruthy();
+      const productionElement = await ProductionPrefetch({
+        query,
+        params: { id: "u1" },
+        children: null,
+      });
+      const productionState = (
+        productionElement as ReactElement<{ state: unknown }>
+      ).props.state as {
+        queries: Array<{ meta?: Record<string, unknown> }>;
+      };
       expect(fetchUser).toHaveBeenCalledOnce();
+      expect(
+        productionState.queries[0]?.meta?.__p9vDevtools,
+      ).toBeUndefined();
+
+      const productionOptInResource = defineResource({
+        name: "production-opt-in",
+        key: () => ["production-opt-in"] as const,
+        fetch: async () => ({ ok: true }),
+      });
+      const productionOptInQuery = defineRouteQuery({
+        name: "production-opt-in",
+        root: () => [productionOptInResource(undefined)],
+      });
+      const optInElement = await ProductionPrefetch({
+        query: productionOptInQuery,
+        params: undefined,
+        children: null,
+        devtools: true,
+      });
+      const optInState = (
+        optInElement as ReactElement<{ state: unknown }>
+      ).props.state as {
+        queries: Array<{ meta?: Record<string, unknown> }>;
+      };
+      expect(optInState.queries[0]?.meta?.__p9vDevtools).toBeTruthy();
     } finally {
       vi.unstubAllEnvs();
       vi.resetModules();

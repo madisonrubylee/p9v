@@ -6,6 +6,7 @@ export default defineConfig({
     react: "src/react.ts",
     "server/index": "src/server/index.ts",
     "devtools/index": "src/devtools/index.ts",
+    "devtools/react": "src/devtools/react.tsx",
     cli: "src/cli.ts",
   },
   format: ["esm", "cjs"],
@@ -18,7 +19,12 @@ export default defineConfig({
   // Preserve the "use client" directive on the client entry through bundling.
   async onSuccess() {
     const { readFileSync, writeFileSync } = await import("node:fs");
-    for (const file of ["dist/react.js", "dist/react.cjs"]) {
+    for (const file of [
+      "dist/react.js",
+      "dist/react.cjs",
+      "dist/devtools/react.js",
+      "dist/devtools/react.cjs",
+    ]) {
       const contents = readFileSync(file, "utf8");
       if (!contents.startsWith('"use client"')) {
         writeFileSync(file, `"use client";\n${contents}`);

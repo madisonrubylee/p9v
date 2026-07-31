@@ -135,8 +135,35 @@ and code-colocation trade-off discussed by the
 
 ## Find existing React Query waterfalls
 
-The optional devtools record query-cache timings, identify serial requests, and
-print the critical path.
+Mount the browser Devtools once inside your `QueryClientProvider`:
+
+```tsx
+import { P9vDevtools } from "@p9v/core/devtools/react";
+
+<QueryClientProvider client={queryClient}>
+  <P9vDevtools />
+  {children}
+</QueryClientProvider>;
+```
+
+The floating panel displays p9v `<Prefetch>` server resources and browser-side
+TanStack Query requests as separate timing sessions. It shows the suspected
+critical path, observed versus parallel time, query keys, and JSON that remains
+compatible with the CLI. General raw RSC `fetch` calls are outside its scope.
+
+The panel and server timing collection are enabled by default only in
+development. To diagnose an explicitly authorized production session, enable
+both sides:
+
+```tsx
+<Prefetch query={pageQuery} params={params} devtools>
+  {children}
+</Prefetch>
+
+<P9vDevtools enabled />
+```
+
+The headless recorder remains available for custom integrations:
 
 ```ts
 import { WaterfallRecorder } from "@p9v/core/devtools";
@@ -170,6 +197,7 @@ in CI.
 | `useFragment(fragment, arg)` | Reactively read prefetched, masked cache data  |
 | `<Prefetch query params>`    | Prefetch, dehydrate, and hydrate route data    |
 | `WaterfallRecorder`          | Record and analyze query timing in development |
+| `P9vDevtools`                | Inspect server/client timings in the browser   |
 | `P9vRouteConfigError`        | Describe missing route resource prefetches     |
 
 ### Package entry points
@@ -180,6 +208,7 @@ in CI.
 | `@p9v/core/react`    | Client      | `useFragment`, `P9vProvider`, `RouteQueryProvider` |
 | `@p9v/core/server`   | Server      | `Prefetch`, `getServerQueryClient`                 |
 | `@p9v/core/devtools` | Any         | Recorder, analysis, and reporting utilities        |
+| `@p9v/core/devtools/react` | Client | Browser `P9vDevtools` panel                         |
 
 ## Strict mode
 

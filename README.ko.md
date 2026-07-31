@@ -197,12 +197,36 @@ export default async function Page({ params }) {
 | `@p9v/core/react`    | 클라이언트 (`"use client"`) | `useFragment`, `P9vProvider`, `RouteQueryProvider`                                              |
 | `@p9v/core/server`   | 서버                        | `<Prefetch>`, `getServerQueryClient`                                                            |
 | `@p9v/core/devtools` | 모든 환경                   | `WaterfallRecorder`, `analyzeTimings`, `formatReport`                                           |
+| `@p9v/core/devtools/react` | 클라이언트             | 브라우저용 `<P9vDevtools>` 패널                                                               |
 
 React Server Component(RSC)가 클라이언트 전용 코드(`createContext`, Custom Hook 등)를 서버 컴포넌트 그래프로 끌어들이지 않고도 `@p9v/core`를 import할 수 있도록 진입점이 분리되어 있습니다.
 
 ## 기존 코드베이스 진단
 
-p9v를 본격적으로 도입하기 전에 현재 애플리케이션의 어느 부분에서 워터폴이 발생하는지 진단할 수 있습니다. 단순 네트워크 탭 기반 측정 도구와 달리 `WaterfallRecorder`는 React Query의 쿼리 캐시에 직접 바인딩되어 단순 URL이 아닌 쿼리(Key, Resource) 단위로 워터폴을 분석합니다.
+브라우저 Devtools를 `QueryClientProvider` 안에 한 번 추가합니다.
+
+```tsx
+import { P9vDevtools } from "@p9v/core/devtools/react";
+
+<QueryClientProvider client={queryClient}>
+  <P9vDevtools />
+  {children}
+</QueryClientProvider>;
+```
+
+플로팅 패널은 p9v `<Prefetch>`의 서버 resource와 브라우저 TanStack Query 요청을 별도 세션으로 표시합니다. 의심되는 critical path, 실제 시간과 병렬화 예상 시간, query key, CLI 호환 JSON을 확인할 수 있습니다. p9v를 거치지 않는 일반 RSC `fetch`는 측정 범위에 포함되지 않습니다.
+
+패널과 서버 timing 수집은 개발 환경에서만 기본 활성화됩니다. 명시적으로 승인된 프로덕션 진단에서는 양쪽을 모두 켜야 합니다.
+
+```tsx
+<Prefetch query={pageQuery} params={params} devtools>
+  {children}
+</Prefetch>
+
+<P9vDevtools enabled />
+```
+
+직접 만든 통합에는 기존 headless recorder를 사용할 수 있습니다. 단순 네트워크 탭 기반 측정 도구와 달리 `WaterfallRecorder`는 React Query의 쿼리 캐시에 직접 바인딩되어 단순 URL이 아닌 쿼리(Key, Resource) 단위로 워터폴을 분석합니다.
 
 ```ts
 import { WaterfallRecorder } from "@p9v/core/devtools";
@@ -263,6 +287,10 @@ root 리소스를 병렬로 프리페치하고 직렬화(dehydrate)하여 클라
 ### `WaterfallRecorder` / `analyzeTimings` / `formatReport` — `@p9v/core/devtools`에서 제공
 
 `new WaterfallRecorder(queryClient).start()`는 쿼리 캐시에 연결되어 페치 타임라인을 기록합니다. `recorder.analyze()`는 분석 리포트를 반환하고, `recorder.format()`은 ASCII 형식의 타임라인 그래프를 출력하며, `recorder.toJSON()`은 `p9v analyze` CLI에서 사용할 타임라인 데이터를 저장합니다.
+
+### `<P9vDevtools>` — `@p9v/core/devtools/react`에서 제공
+
+개발 환경에서 p9v 서버 prefetch와 브라우저 TanStack Query 요청을 별도 세션으로 보여주는 플로팅 패널입니다. 프로덕션에서는 `enabled`를 명시해야 렌더링되며, 서버 timing도 필요하면 `<Prefetch devtools>`를 함께 설정합니다.
 
 ## Strict 모드
 

@@ -16,6 +16,10 @@ export default function Home() {
         <li>
           <Link href="/p9v/u1">/p9v/u1</Link> — p9v parallel prefetch
         </li>
+        <li>
+          <Link href="/client-waterfall/u1">/client-waterfall/u1</Link> —
+          browser React Query waterfall for the DevTools panel
+        </li>
       </ul>
       <p style={{ opacity: 0.6 }}>
         Run <code>pnpm bench</code> to measure both.

@@ -2,6 +2,7 @@ node_modules
 dist
 coverage
 *.log
+*.tsbuildinfo
 .DS_Store
 .turbo
 .next
@@ -9,3 +10,5 @@ coverage
 p9v.record.json
 examples/**/node_modules
 examples/**/.next
+examples/**/playwright-report
+examples/**/test-results

@@ -1,7 +1,7 @@
 {
   "name": "@p9v/core",
-  "version": "0.1.0",
-  "description": "Prefetch → View. A Relay-style data layer for REST + TanStack Query with fragment colocation, data masking, and route prefetch enforcement.",
+  "version": "0.2.0",
+  "description": "Prefetch → View. A Relay-style REST + TanStack Query data layer with route enforcement and browser waterfall Devtools.",
   "keywords": [
     "react",
     "nextjs",
@@ -25,6 +25,7 @@
     "colocation",
     "prefetch",
     "waterfall",
+    "devtools",
     "suspense",
     "rsc",
     "server-components",
@@ -74,6 +75,11 @@
       "types": "./dist/devtools/index.d.ts",
       "import": "./dist/devtools/index.js",
       "require": "./dist/devtools/index.cjs"
+    },
+    "./devtools/react": {
+      "types": "./dist/devtools/react.d.ts",
+      "import": "./dist/devtools/react.js",
+      "require": "./dist/devtools/react.cjs"
     },
     "./package.json": "./package.json"
   },

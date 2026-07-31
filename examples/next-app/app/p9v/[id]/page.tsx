@@ -17,7 +17,7 @@ export default async function P9vUserPage({
 }) {
   const { id } = await params;
   return (
-    <Prefetch query={userPageQuery} params={{ id }}>
+    <Prefetch query={userPageQuery} params={{ id }} devtools>
       <Page heading="p9v — parallel prefetch">
         <UserCard id={id} />
         <StatsPanel id={id} />

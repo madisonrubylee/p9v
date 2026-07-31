@@ -50,6 +50,9 @@ try {
     "dist/server/index.cjs",
     "dist/devtools/index.js",
     "dist/devtools/index.cjs",
+    "dist/devtools/react.js",
+    "dist/devtools/react.cjs",
+    "dist/devtools/react.d.ts",
     "dist/cli.cjs",
   ]) {
     if (!packedFiles.has(requiredFile)) {
@@ -99,6 +102,7 @@ try {
     "@p9v/core/react",
     "@p9v/core/server",
     "@p9v/core/devtools",
+    "@p9v/core/devtools/react",
   ];
   execFileSync(
     process.execPath,
@@ -126,8 +130,9 @@ try {
       'import { useFragment } from "@p9v/core/react";',
       'import { Prefetch } from "@p9v/core/server";',
       'import { WaterfallRecorder } from "@p9v/core/devtools";',
+      'import { P9vDevtools } from "@p9v/core/devtools/react";',
       "void defineResource; void defineRouteQuery; void P9vRouteConfigError; void useFragment;",
-      "void Prefetch; void WaterfallRecorder;",
+      "void Prefetch; void WaterfallRecorder; void P9vDevtools;",
       "type SmokeRoute = RouteQuery<{ id: string }>;",
       "const route = null as unknown as SmokeRoute; void route;",
     ].join("\n"),
@@ -155,6 +160,15 @@ try {
   );
   if (!reactEntry.startsWith('"use client"')) {
     throw new Error('The React entry is missing its "use client" directive.');
+  }
+  const devtoolsReactEntry = readFileSync(
+    join(packageDirectory, "dist/devtools/react.js"),
+    "utf8",
+  );
+  if (!devtoolsReactEntry.startsWith('"use client"')) {
+    throw new Error(
+      'The Devtools React entry is missing its "use client" directive.',
+    );
   }
 
   const cliOutput = execFileSync(
