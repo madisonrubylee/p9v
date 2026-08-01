@@ -6,10 +6,11 @@ built several ways:
 - `/vanilla/[id]` — the classic **nested component waterfall**: each async
   section awaits its own data before the next one starts. Three 400ms requests
   run back-to-back.
-- `/p9v/[id]` — the strict API combines `defineRouteQuery`, `withFragments`, and
-  blocking parallel prefetch.
-- `/p9v-streaming/[id]` — the beginner API passes resources directly, dehydrates
-  pending queries, and lets three Suspense boundaries stream independently.
+- `/p9v/[id]` — the compatible Resource API combines `defineRouteQuery`,
+  `withFragments`, and blocking parallel prefetch.
+- `/p9v-streaming/[id]` — the 0.4 TanStack-native contract API uses ordinary
+  `queryOptions`/`useSuspenseQuery`, validates component requirements, and lets
+  three pending queries stream independently.
 - `/client-waterfall/[id]` — three nested browser-side TanStack Query requests
 used to demonstrate the p9v Devtools suspected-waterfall timeline.
 

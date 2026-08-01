@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { RouteComponent } from "./types.js";
+import type { QueryRequirementComponent } from "./routeContract.js";
 
 const isProd = process.env.NODE_ENV === "production";
 
@@ -45,7 +46,9 @@ export function P9vProvider(props: {
  */
 export interface RouteScope {
   readonly resourceNames: ReadonlySet<string>;
-  readonly components: readonly RouteComponent[];
+  readonly queryHashes: ReadonlySet<string>;
+  readonly queryContractNames: ReadonlySet<string>;
+  readonly components: readonly (RouteComponent | QueryRequirementComponent)[];
   readonly routeName: string | undefined;
 }
 

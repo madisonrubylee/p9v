@@ -1,28 +1,53 @@
-# p9v — React Query 요청 워터폴 방지
+<p align="center">
+<img src="./assets/logo.png" alt="p9v logo" width="640" />
+</p>
+
+# p9v — TanStack Query Prefetch Integrity
 
 [English](./README.md) | 한국어
 
-**TanStack Query와 Next.js App Router를 위한 prefetch correctness layer입니다.**
+**TanStack Query는 prefetch하는 법을 알고, p9v는 빠뜨리지 않았는지 보장합니다.**
 
-TanStack Query는 이미 prefetch와 Suspense streaming을 잘 지원합니다. p9v는
-새로운 fetch 방식을 만드는 대신, 라우트의 prefetch와 실제 컴포넌트 소비자를
-연결합니다. 빠진 prefetch는 숨어 있는 클라이언트 요청이 아니라 개발 환경의
-명확한 오류가 됩니다.
+p9v는 TanStack Query 애플리케이션을 위한 correctness layer입니다. 컴포넌트
+가까이에 query 요구사항을 두고, 라우트가 정확한 query를 시작했는지 검증하며,
+예상하지 못한 브라우저 cache miss를 개발 오류와 CI 실패로 바꿉니다. fetch, cache,
+Suspense, dehydration과 hydration은 계속 TanStack Query가 담당합니다.
 
-- `defineResource`, `useResource`, `<Prefetch>`만으로 간단하게 시작
-- RSC 환경에서 pending query를 React Suspense로 streaming
-- 정확한 query key의 cache miss를 감지해 waterfall 회귀 방지
-- 필요할 때만 fragment masking과 컴파일타임 route 검증 적용
-- GraphQL, 코드 생성, 빌드 플러그인 불필요
+- 기존 `queryOptions`, `useQuery`, `useSuspenseQuery`를 그대로 사용
+- 계약 이름 누락은 타입으로, 정확한 query key 누락은 런타임으로 검증
+- Next.js App Router에서 blocking과 streaming query를 동시에 시작
+- prefetched, 의도적 deferred, 예상 밖 waterfall을 Devtools에서 구분
+- `p9v analyze`로 route 성능 예산을 CI에서 강제
+- 기존 Resource와 fragment API도 0.4에서 호환 유지
+
+## 수동 prefetch와 속도가 같은데 왜 p9v를 쓰나요?
+
+p9v는 올바르게 작성된 TanStack Query prefetch를 더 빠르게 만들지 않습니다.
+동일한 TanStack Query primitive를 실행하므로 성능이 같은 것이 정상입니다.
 
 ```text
 중첩된 순차 요청               1,202 ms
 수동 TanStack 병렬 prefetch      401 ms
 p9v 병렬 prefetch                401 ms
-
-올바른 수동 prefetch와 p9v의 실행 성능은 같습니다.
-p9v는 재사용 가능한 계약과 누락 검증을 더합니다.
 ```
+
+차이는 컴포넌트 트리가 변경된 뒤에 나타납니다. 자식 컴포넌트가 query를 추가하거나
+key를 바꾸고 route prefetch를 갱신하지 않으면, 수동 방식은 조용히 waterfall로
+회귀합니다. p9v는 이 누락을 개발 환경이나 CI에서 배포 전에 실패시킵니다.
+
+```text
+                              현재      자식 query 누락 이후
+수동 TanStack prefetch        401 ms              802 ms
+p9v                           401 ms           CI 실패
+```
+
+p9v는 더 빠른 query client라기보다 **prefetch 무결성을 위한 타입 검사기**에
+가깝습니다. 여러 팀이 공용 컴포넌트를 재사용하거나, route tree가 크거나, 잦은
+리팩터링 속에서도 성능 budget을 지켜야 할 때 가치가 있습니다.
+
+페이지마다 명확한 query가 한두 개뿐인 작은 애플리케이션이라면 수동 TanStack
+prefetch가 더 단순하며 p9v가 필요하지 않을 수 있습니다. p9v는 존재하지 않는
+속도 우위를 주장하지 않고 이 선택 기준을 명확히 합니다.
 
 ## 설치
 
@@ -34,47 +59,64 @@ React 18 또는 19와 TanStack Query 5를 지원합니다.
 
 ## 빠르게 시작하기
 
-### 1. 리소스를 한 번 정의합니다
+### 1. 기존 TanStack options에 계약을 추가합니다
 
 ```ts
-import { defineResource } from "@p9v/core";
+import { queryOptions } from "@tanstack/react-query";
+import { defineQueryContract } from "@p9v/core";
 
-export const userResource = defineResource({
+export const userQuery = defineQueryContract({
   name: "user",
-  key: (id: string) => ["user", id] as const,
-  fetch: (id) => api.get<User>(`/users/${id}`),
+  options: (id: string) =>
+    queryOptions({
+      queryKey: ["user", id] as const,
+      queryFn: () => api.get<User>(`/users/${id}`),
+    }),
 });
 ```
 
-리소스 이름은 애플리케이션 안에서 고유해야 합니다.
+반환값은 그대로 TanStack query options입니다. `infiniteQueryOptions`도 지원하며,
+p9v가 서버에서 `prefetchInfiniteQuery`를 자동으로 선택합니다.
 
-### 2. 컴포넌트에서 읽습니다
+### 2. 컴포넌트에 요구사항을 둡니다
 
 ```tsx
-import { useResource } from "@p9v/core/react";
+"use client";
 
-export function UserCard({ userId }: { userId: string }) {
-  const user = useResource(userResource, userId);
-  return <span>{user.name}</span>;
-}
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { withQueryRequirements } from "@p9v/core";
+
+export const UserCard = withQueryRequirements(
+  [userQuery],
+  function UserCard({ userId }: { userId: string }) {
+    const { data } = useSuspenseQuery(userQuery(userId));
+    return <span>{data.name}</span>;
+  },
+);
 ```
 
-`useResource`는 hydrated cache의 전체 데이터를 반응형으로 읽습니다. 개발
-환경에서 실제 cache miss가 발생하면 조용히 요청을 시작하는 대신 정확한 query
-key와 문제를 일으킨 컴포넌트가 담긴 `P9vWaterfallError`를 던집니다.
+컴포넌트는 TanStack Query를 직접 사용합니다. hydrated cache에 정확한 key가 없으면
+개발 환경에서 조용히 브라우저 요청을 시작하지 않고 `P9vWaterfallError`를 던집니다.
 
-### 3. 라우트에서 함께 시작합니다
+### 3. 라우트 계약을 실행합니다
 
 ```tsx
+import { defineRouteContract } from "@p9v/core";
 import { Prefetch } from "@p9v/core/server";
+
+export const userPage = defineRouteContract({
+  name: "user-page",
+  load: ({ id }: { id: string }) => [
+    { query: userQuery(id), policy: "blocking" },
+    { query: statsQuery(id), policy: "streaming" },
+  ],
+  includes: [UserCard, StatsPanel],
+});
 
 export default async function Page({ params }) {
   const { id } = await params;
   return (
-    <Prefetch
-      resources={[userResource(id), statsResource(id)]}
-      name="user-page"
-    >
+    <Prefetch contract={userPage} params={{ id }}>
       <UserCard userId={id} />
       <StatsPanel userId={id} />
     </Prefetch>
@@ -82,97 +124,34 @@ export default async function Page({ params }) {
 }
 ```
 
-기본 `mode="blocking"`은 모든 리소스를 병렬로 시작하고 완료를 기다립니다.
+모든 query는 함께 시작됩니다. `blocking`만 서버 boundary를 기다리게 하고,
+`streaming`은 pending Promise를 dehydrate합니다. `includes`가 요구하지만 `load`에
+없는 계약은 TypeScript와 개발 환경 route 검증에서 실패합니다.
 
-### Suspense streaming
+라우트가 `userQuery("u1")`을 준비했는데 컴포넌트가 `userQuery("u2")`를 읽는
+경우에도 정확한 key의 cache miss가 런타임에서 잡힙니다.
 
-```tsx
-<Prefetch resources={[userResource(id)]} mode="streaming">
-  <Suspense fallback={<UserCardSkeleton />}>
-    <UserCard userId={id} />
-  </Suspense>
-</Prefetch>
-```
+## 의도적인 클라이언트 query
 
-`streaming`은 요청 완료를 기다리지 않고 pending query와 Promise를 클라이언트로
-전달합니다. `useResource`와 `useFragment`는 기존 Promise를 재사용해 suspend하며
-중복 요청을 만들지 않습니다. 이 모드는 Next.js App Router처럼 RSC Promise
-직렬화를 지원하는 환경에서 사용합니다. 그 외 환경에서는 기본 blocking 모드를
-사용합니다.
+검색이나 사용자 인터랙션처럼 브라우저에서 시작해야 하는 query는 명시합니다.
 
-## 더 강한 계약이 필요할 때
-
-기본 API에는 field masking이나 컴파일타임 route completeness가 없습니다. 큰
-화면이나 공용 컴포넌트에서 더 강한 계약이 필요할 때 fragment 모드를 선택합니다.
-
-```tsx
-import { defineRouteQuery, fragment, withFragments } from "@p9v/core";
-import { useFragment } from "@p9v/core/react";
-
-const UserCard_user = fragment(userResource, ["id", "name", "avatarUrl"]);
-
-export const UserCard = withFragments(
-  [UserCard_user],
-  function UserCard({ userId }: { userId: string }) {
-    const user = useFragment(UserCard_user, userId);
-    return <span>{user.name}</span>;
-  },
-);
-
-export const userPageQuery = defineRouteQuery({
-  name: "user-page",
-  root: ({ id }: { id: string }) => [userResource(id)],
-  includes: [UserCard],
+```ts
+const searchQuery = defineQueryContract({
+  name: "search",
+  defer: true,
+  options: (term: string) => queryOptions({ /* ... */ }),
 });
+
+useSuspenseQuery(userQuery(id, { defer: true }));
 ```
 
-`includes`가 요구하는 리소스가 `root`에 없으면 TypeScript와 개발 환경 검증이
-실패합니다. `useFragment`는 선언한 필드만 노출하고 개발 환경에서는 `Proxy`로
-미선언 필드 접근도 막습니다. 기존 문법도 계속 지원합니다.
+프로덕션에서는 안전하게 TanStack fetch로 fallback합니다. 서버 route query는
+`prefetched`, 의도적인 요청은 `intentional-deferred`, 예상 밖 cache miss는
+`unexpected-waterfall`로 기록됩니다.
 
-```tsx
-UserCard.fragments = [UserCard_user] as const;
-```
+## Devtools와 CI budget
 
-기존 route query는 그대로 `<Prefetch>`에 전달할 수 있고 streaming도 선택할 수
-있습니다.
-
-```tsx
-<Prefetch query={userPageQuery} params={{ id }} mode="streaming">
-  <UserCard userId={id} />
-</Prefetch>
-```
-
-## p9v가 추가하는 것
-
-| 방식 | 데이터 요구사항 위치 | 병렬 요청 | 누락 방지 |
-| --- | :---: | :---: | :---: |
-| 컴포넌트 내부 fetch | 컴포넌트 | 아니요 | 아니요 |
-| 수동 TanStack prefetch | 라우트 | 예 | 아니요 |
-| 탐지 전용 도구 | 컴포넌트 | 아니요 | 사후 경고 |
-| **p9v** | 컴포넌트 + 라우트 계약 | 예 | **개발 오류/타입 오류** |
-
-핵심은 “TanStack Query는 prefetch할 수 있게 하고, p9v는 prefetch를 빼먹지
-못하게 한다”입니다. 올바르게 작성한 수동 TanStack Query prefetch보다 p9v가 더
-빠르다고 주장하지 않습니다. p9v는 동일한 실행 방식 위에 누락 검증, 반복 코드
-축소, Devtools를 추가합니다.
-
-## Strict 동작
-
-cache reader는 다음 순서로 상태를 처리합니다.
-
-1. 사용할 데이터가 있으면 즉시 반환
-2. pending query가 있으면 기존 Promise로 suspend
-3. 실패한 query면 원래 fetch 오류를 Error Boundary로 전달
-4. query 자체가 없으면 개발 strict 모드에서 `P9vWaterfallError`
-
-프로덕션의 실제 cache miss는 서비스 안정성을 위해 fetch 후 suspend합니다. 개발
-환경에서도 의도적인 요청이라면 `useResource(resource, arg, { defer: true })`
-또는 `fragment(..., { defer: true })`를 사용합니다.
-
-## Devtools
-
-`QueryClientProvider` 안에 한 번 추가합니다.
+`QueryClientProvider` 안에 패널을 추가합니다.
 
 ```tsx
 import { P9vDevtools } from "@p9v/core/devtools/react";
@@ -183,55 +162,59 @@ import { P9vDevtools } from "@p9v/core/devtools/react";
 </QueryClientProvider>;
 ```
 
-패널은 p9v 서버 prefetch와 브라우저 TanStack Query 요청을 별도 세션으로 표시하고
-critical path, query key, 실제 시간과 병렬화 예상 시간을 보여줍니다. streaming
-서버 요청은 pending 상태로 전달된 뒤 브라우저에서 완료되면 같은 서버 timing으로
-갱신됩니다.
+`WaterfallRecorder.toJSON()`을 `p9v.record.json`으로 저장하고 다음
+`p9v.config.json`을 추가할 수 있습니다.
 
-CLI 분석도 사용할 수 있습니다.
+```json
+{
+  "maxUnexpectedWaterfalls": 0,
+  "maxDepth": 1,
+  "maxCriticalPathMs": 500,
+  "routes": {
+    "dashboard": { "maxCriticalPathMs": 400 }
+  }
+}
+```
 
 ```bash
 npx p9v analyze
+npx p9v analyze artifacts/profile.json --config config/p9v.json
 ```
 
-워터폴을 찾으면 0이 아닌 exit code를 반환하므로 CI 검증 단계로 사용할 수 있습니다.
+전역 또는 route budget을 넘으면 0이 아닌 exit code를 반환합니다. 설정 파일이
+없으면 기존처럼 추정 waterfall depth가 1보다 클 때 실패합니다.
 
-## API 요약
+## 기존 API 호환성
 
-| API | 역할 |
+`defineResource`, `useResource`, `fragment`, `useFragment`,
+`defineRouteQuery`, `<Prefetch resources>`는 0.4에서도 그대로 지원합니다.
+간단한 p9v 전용 모델에는 Resource API를, field masking이 필요할 때는 fragment를
+선택하면 됩니다. 기존 사용자는 마이그레이션할 필요가 없습니다. 자세한 내용은
+[0.4 도입 가이드](./MIGRATION.md)를 참고하세요.
+
+## 진입점
+
+| Import | 주요 API |
 | --- | --- |
-| `defineResource(...)` | fetcher, query key, cache 옵션 정의 |
-| `useResource(resource, arg)` | prefetched 전체 데이터 읽기 |
-| `fragment(resource, fields)` | 컴포넌트 필드 계약과 masking 정의 |
-| `withFragments(fragments, component)` | 컴포넌트에 fragment metadata 연결 |
-| `useFragment(fragment, arg)` | masked cache 데이터 읽기 |
-| `defineRouteQuery(...)` | route 리소스와 포함 컴포넌트 계약 정의 |
-| `<Prefetch resources>` | 간단한 직접 prefetch |
-| `<Prefetch query params>` | 검증 가능한 route prefetch |
-| `WaterfallRecorder` / `P9vDevtools` | query timing 분석과 시각화 |
-
-### 진입점
-
-| Import | 환경 | 주요 export |
-| --- | --- | --- |
-| `@p9v/core` | 서버 안전 | `defineResource`, `fragment`, `withFragments`, `defineRouteQuery` |
-| `@p9v/core/react` | 클라이언트 | `useResource`, `useFragment`, `P9vProvider`, `RouteQueryProvider` |
-| `@p9v/core/server` | 서버 | `Prefetch`, `getServerQueryClient` |
-| `@p9v/core/devtools` | 모든 환경 | recorder와 분석 유틸리티 |
-| `@p9v/core/devtools/react` | 클라이언트 | `P9vDevtools` |
+| `@p9v/core` | query/component/route contract, 기존 Resource/fragment API |
+| `@p9v/core/react` | `RouteContractProvider`, `P9vProvider`, 기존 read hook |
+| `@p9v/core/server` | Next.js/RSC `<Prefetch>`, `getServerQueryClient` |
+| `@p9v/core/devtools` | recorder, 분석, `evaluateBudgets` |
+| `@p9v/core/devtools/react` | 브라우저 `P9vDevtools` |
 
 ## 개발
 
 ```bash
 pnpm install
-pnpm build
-pnpm test
 pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:package
 ```
 
-Next.js blocking/streaming 예제와 benchmark는
-[`examples/next-app/README.md`](./examples/next-app/README.md)를 참고하세요.
+blocking, streaming, 브라우저 waterfall 예시는
+[`examples/next-app`](./examples/next-app)에 있습니다.
 
 ## 라이선스
 
-MIT
+[MIT](./LICENSE)

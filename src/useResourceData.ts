@@ -10,6 +10,7 @@ import type { Resource } from "./types.js";
 import { captureOwnerStack } from "./ownerStack.js";
 import { useP9vConfig, useRouteScope } from "./context.js";
 import { P9vWaterfallError } from "./errors.js";
+import { withP9vQueryMetadata } from "./metadata.js";
 
 interface ResourceReadOptions {
   readonly defer: boolean;
@@ -48,7 +49,19 @@ export function useResourceData<
   }
 
   if (options.defer || !config.strict) {
-    throw client.ensureQueryData(resource.queryOptions(arg));
+    const queryOptions = resource.queryOptions(arg);
+    throw client.ensureQueryData({
+      ...queryOptions,
+      meta: withP9vQueryMetadata(queryOptions.meta, {
+        version: 1,
+        contractName: resource.resourceName,
+        queryKey,
+        classification: options.defer
+          ? "intentional-deferred"
+          : "unexpected-waterfall",
+        routeName: routeScope?.routeName ?? null,
+      }),
+    });
   }
 
   throw new P9vWaterfallError({

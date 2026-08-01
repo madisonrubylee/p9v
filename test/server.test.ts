@@ -7,8 +7,120 @@ import { Prefetch } from "../src/server/index.js";
 import { getServerQueryClient } from "../src/server/index.js";
 import { P9vRouteConfigError } from "../src/errors.js";
 import type { RouteComponent } from "../src/types.js";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { defineQueryContract } from "../src/queryContract.js";
+import { defineRouteContract } from "../src/routeContract.js";
+import { withQueryRequirements } from "../src/withQueryRequirements.js";
 
 describe("Prefetch route validation", () => {
+  it("starts mixed contract policies together and only awaits blocking queries", async () => {
+    const client = getServerQueryClient();
+    client.clear();
+    const started: string[] = [];
+    let releaseBlocking!: () => void;
+    let releaseStreaming!: () => void;
+    const blockingGate = new Promise<void>((resolve) => { releaseBlocking = resolve; });
+    const streamingGate = new Promise<void>((resolve) => { releaseStreaming = resolve; });
+    const makeContract = (name: "contract-user" | "contract-stats", gate: Promise<void>) =>
+      defineQueryContract({
+        name,
+        options: (id: string) => queryOptions({
+          queryKey: [name, id] as const,
+          queryFn: async () => {
+            started.push(name);
+            await gate;
+            return { id };
+          },
+        }),
+      });
+    const user = makeContract("contract-user", blockingGate);
+    const stats = makeContract("contract-stats", streamingGate);
+    const route = defineRouteContract({
+      name: "contract-page",
+      load: ({ id }: { id: string }) => [
+        { query: user(id), policy: "blocking" },
+        { query: stats(id), policy: "streaming" },
+      ],
+    });
+
+    const result = Prefetch({ contract: route, params: { id: "u1" }, children: null });
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    releaseBlocking();
+    const element = await result;
+    const state = (element as ReactElement<{ state: unknown }>).props.state as {
+      queries: Array<{
+        state: { status: string };
+        meta?: Record<string, any>;
+        promise?: Promise<unknown>;
+      }>;
+    };
+
+    expect(state.queries.map((query) => query.state.status).sort()).toEqual([
+      "pending",
+      "success",
+    ]);
+    expect(
+      state.queries.every(
+        (query) => query.meta?.__p9v?.classification === "prefetched",
+      ),
+    ).toBe(true);
+    releaseStreaming();
+    await Promise.all(state.queries.map((query) => query.promise));
+  });
+
+  it("rejects a route contract with a missing component requirement", async () => {
+    const user = defineQueryContract({
+      name: "required-user",
+      options: (id: string) => queryOptions({
+        queryKey: ["required-user", id] as const,
+        queryFn: async () => ({ id }),
+      }),
+    });
+    const UserCard = withQueryRequirements(
+      [user],
+      Object.assign(function UserCard() {
+        return null;
+      }, { displayName: "UserCard" }),
+    );
+    const invalidRoute = defineRouteContract({
+      name: "invalid-contract-page",
+      load: (() => []) as () => any,
+      includes: [UserCard],
+    });
+
+    await expect(
+      Prefetch({ contract: invalidRoute, params: undefined, children: null }),
+    ).rejects.toMatchObject({
+      missingQueries: [{ queryName: "required-user", componentName: "UserCard" }],
+    });
+  });
+
+  it("prefetches and dehydrates an infinite query contract", async () => {
+    const client = getServerQueryClient();
+    client.clear();
+    const feed = defineQueryContract({
+      name: "infinite-feed",
+      options: () => infiniteQueryOptions({
+        queryKey: ["infinite-feed"] as const,
+        initialPageParam: 0,
+        queryFn: async ({ pageParam }) => ({ page: pageParam }),
+        getNextPageParam: (lastPage) => lastPage.page + 1,
+      }),
+    });
+    const route = defineRouteContract({
+      load: () => [{ query: feed(undefined), policy: "blocking" }],
+    });
+
+    const element = await Prefetch({
+      contract: route,
+      params: undefined,
+      children: null,
+    });
+    const state = (element as ReactElement<{ state: unknown }>).props.state as {
+      queries: Array<{ state: { data?: { pages?: unknown[] } } }>;
+    };
+    expect(state.queries[0]?.state.data?.pages).toEqual([{ page: 0 }]);
+  });
   it("accepts direct resources and blocks after starting them in parallel", async () => {
     const client = getServerQueryClient();
     client.clear();

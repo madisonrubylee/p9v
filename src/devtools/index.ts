@@ -1,5 +1,11 @@
 import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { captureOwnerName } from "../ownerStack.js";
+import {
+  readP9vQueryMetadata,
+  type QueryClassification,
+} from "../metadata.js";
+
+export type { QueryClassification } from "../metadata.js";
 
 /** One fetch cycle of one query, as observed by the recorder. */
 export interface QueryTiming {
@@ -20,6 +26,8 @@ export interface QueryTiming {
   sessionId?: string;
   /** Route name for p9v server-prefetch sessions. */
   routeName?: string | null;
+  /** Contract-backed classification; absent for unregistered TanStack queries. */
+  classification?: QueryClassification;
 }
 
 export interface RecorderSnapshot {
@@ -54,6 +62,27 @@ export interface WaterfallReport {
   parallelMs: number;
   /** Depth of the longest waterfall chain (number of sequential fetches). */
   depth: number;
+  /** Sum of durations on the inferred longest sequential chain. */
+  criticalPathMs: number;
+  /** Contract-backed client cache misses, independent of timing inference. */
+  unexpectedWaterfalls: number;
+}
+
+export interface WaterfallBudget {
+  maxUnexpectedWaterfalls?: number;
+  maxDepth?: number;
+  maxCriticalPathMs?: number;
+}
+
+export interface WaterfallBudgetConfig extends WaterfallBudget {
+  routes?: Record<string, WaterfallBudget>;
+}
+
+export interface WaterfallBudgetViolation {
+  scope: string;
+  metric: "unexpectedWaterfalls" | "depth" | "criticalPathMs";
+  actual: number;
+  maximum: number;
 }
 
 export interface RecorderOptions {
@@ -158,7 +187,7 @@ export class WaterfallRecorder {
       const keyHash = query.queryHash ?? hashKey(query.queryKey);
 
       if (action.type === "fetch") {
-        this.onFetchStart(keyHash, query.queryKey);
+        this.onFetchStart(keyHash, query.queryKey, query.meta);
       } else if (action.type === "success" || action.type === "error") {
         this.onSettle(keyHash, action.type === "success" ? "success" : "error");
       }
@@ -192,24 +221,28 @@ export class WaterfallRecorder {
     return this.snapshot;
   }
 
-  private onFetchStart(keyHash: string, key: QueryKey): void {
+  private onFetchStart(keyHash: string, key: QueryKey, meta: unknown): void {
     // A streaming server prefetch resumes from its hydrated promise. Keep it in
     // the original server session instead of reporting a duplicate client fetch.
     if (this.serverInFlight.has(keyHash)) return;
 
+    const queryMetadata = readP9vQueryMetadata(meta);
     const index = this.timings.length;
     this.timings.push({
       id: `${this.sessionId}:${++this.timingSequence}`,
       keyHash,
       key,
-      resource: typeof key[0] === "string" ? key[0] : null,
+      resource:
+        queryMetadata?.contractName ??
+        (typeof key[0] === "string" ? key[0] : null),
       owner: captureOwnerName(),
       startedAt: this.now(),
       settledAt: null,
       status: "pending",
       source: "client",
       sessionId: this.sessionId,
-      routeName: null,
+      routeName: queryMetadata?.routeName ?? null,
+      classification: queryMetadata?.classification,
     });
     this.inFlight.set(keyHash, index);
     this.publishSnapshot();
@@ -322,6 +355,14 @@ export function analyzeTimings(
 
   const longestChain = findLongestChain(timings, edges);
   const depth = longestChain.length;
+  const criticalPathMs = longestChain.reduce((total, index) => {
+    const timing = timings[index];
+    if (!timing) return total;
+    return total + (timing.settledAt ?? timing.startedAt) - timing.startedAt;
+  }, 0);
+  const unexpectedWaterfalls = timings.filter(
+    (timing) => timing.classification === "unexpected-waterfall",
+  ).length;
 
   const starts = timings.map((t) => t.startedAt);
   const ends = timings.map((t) => t.settledAt ?? t.startedAt);
@@ -332,7 +373,79 @@ export function analyzeTimings(
   const durations = settled.map((t) => (t.settledAt ?? t.startedAt) - t.startedAt);
   const parallelMs = durations.length ? Math.max(...durations) : 0;
 
-  return { timings, edges, longestChain, observedMs, parallelMs, depth };
+  return {
+    timings,
+    edges,
+    longestChain,
+    observedMs,
+    parallelMs,
+    depth,
+    criticalPathMs,
+    unexpectedWaterfalls,
+  };
+}
+
+/** Evaluate global and per-route correctness/performance budgets. */
+export function evaluateBudgets(
+  timings: QueryTiming[],
+  config: WaterfallBudgetConfig,
+  sequentialThresholdMs = DEFAULT_THRESHOLD_MS,
+): WaterfallBudgetViolation[] {
+  const violations: WaterfallBudgetViolation[] = [];
+  const sessions = new Map<string, QueryTiming[]>();
+  for (const timing of timings) {
+    const sessionId = timing.sessionId ?? "legacy";
+    const group = sessions.get(sessionId) ?? [];
+    group.push(timing);
+    sessions.set(sessionId, group);
+  }
+  const reports = [...sessions.values()].map((sessionTimings) => ({
+    routeName: sessionTimings[0]?.routeName ?? null,
+    report: analyzeTimings(sessionTimings, sequentialThresholdMs),
+  }));
+
+  const evaluate = (
+    scope: string,
+    budget: WaterfallBudget,
+    scopedReports: WaterfallReport[],
+  ) => {
+    const actual = {
+      unexpectedWaterfalls: scopedReports.reduce(
+        (total, report) => total + report.unexpectedWaterfalls,
+        0,
+      ),
+      depth: scopedReports.reduce(
+        (maximum, report) => Math.max(maximum, report.depth),
+        0,
+      ),
+      criticalPathMs: scopedReports.reduce(
+        (maximum, report) => Math.max(maximum, report.criticalPathMs),
+        0,
+      ),
+    };
+    const limits = [
+      ["unexpectedWaterfalls", budget.maxUnexpectedWaterfalls],
+      ["depth", budget.maxDepth],
+      ["criticalPathMs", budget.maxCriticalPathMs],
+    ] as const;
+    for (const [metric, maximum] of limits) {
+      if (maximum !== undefined && actual[metric] > maximum) {
+        violations.push({ scope, metric, actual: actual[metric], maximum });
+      }
+    }
+  };
+
+  evaluate("all routes", config, reports.map(({ report }) => report));
+  for (const [routeName, routeBudget] of Object.entries(config.routes ?? {})) {
+    evaluate(
+      `route "${routeName}"`,
+      routeBudget,
+      reports
+        .filter((entry) => entry.routeName === routeName)
+        .map((entry) => entry.report),
+    );
+  }
+  return violations;
 }
 
 function findLongestChain(

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- TanStack-native `defineQueryContract`, `withQueryRequirements`, and
+  `defineRouteContract` APIs for ordinary and infinite queries.
+- Exact-key development cache-miss enforcement with explicit deferred client
+  queries.
+- Per-query blocking and streaming policies in the Next.js/RSC `Prefetch`
+  adapter.
+- Deterministic `prefetched`, `intentional-deferred`, and
+  `unexpected-waterfall` Devtools classifications.
+- Global and per-route CLI budgets for unexpected requests, depth, and critical
+  path duration.
+- A client `RouteContractProvider` and 0.4 adoption guide.
+
+### Compatibility
+
+- The 0.3 Resource, fragment, route query, Prefetch, and Devtools APIs remain
+  supported without call-site changes.
+- Production retains its safe fetch fallback and blocking remains the default
+  for legacy Prefetch calls.
+
 ## 0.3.0
 
 ### Added

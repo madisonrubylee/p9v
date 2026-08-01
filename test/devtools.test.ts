@@ -3,12 +3,15 @@ import {
   analyzeTimings,
   createP9vDevtoolsMeta,
   formatReport,
+  evaluateBudgets,
   withP9vDevtoolsMeta,
   WaterfallRecorder,
   type QueryTiming,
 } from "../src/devtools/index.js";
 import { defineResource } from "../src/resource.js";
 import { makeClient } from "./helpers.js";
+import { queryOptions } from "@tanstack/react-query";
+import { defineQueryContract } from "../src/queryContract.js";
 
 function timing(
   resource: string,
@@ -27,6 +30,42 @@ function timing(
 }
 
 describe("analyzeTimings", () => {
+  it("enforces deterministic global and route budgets", () => {
+    const timings: QueryTiming[] = [
+      {
+        ...timing("user", 0, 300),
+        sessionId: "client:dashboard",
+        routeName: "dashboard",
+        classification: "unexpected-waterfall",
+      },
+      {
+        ...timing("stats", 310, 700),
+        sessionId: "client:dashboard",
+        routeName: "dashboard",
+      },
+    ];
+    expect(
+      evaluateBudgets(timings, {
+        maxUnexpectedWaterfalls: 0,
+        maxDepth: 1,
+        routes: { dashboard: { maxCriticalPathMs: 500 } },
+      }),
+    ).toEqual([
+      {
+        scope: "all routes",
+        metric: "unexpectedWaterfalls",
+        actual: 1,
+        maximum: 0,
+      },
+      { scope: "all routes", metric: "depth", actual: 2, maximum: 1 },
+      {
+        scope: 'route "dashboard"',
+        metric: "criticalPathMs",
+        actual: 690,
+        maximum: 500,
+      },
+    ]);
+  });
   it("reports depth 1 when queries run in parallel", () => {
     const report = analyzeTimings([
       timing("user", 0, 300),
@@ -66,6 +105,26 @@ describe("analyzeTimings", () => {
 });
 
 describe("WaterfallRecorder", () => {
+  it("classifies contract cache misses independently of timing inference", async () => {
+    const client = makeClient();
+    const recorder = new WaterfallRecorder(client).start();
+    const deferredQuery = defineQueryContract({
+      name: "deferred-profile",
+      defer: true,
+      options: (id: string) => queryOptions({
+        queryKey: ["deferred-profile", id] as const,
+        queryFn: async () => ({ id }),
+      }),
+    });
+
+    await client.fetchQuery(deferredQuery("u1"));
+    expect(recorder.getTimings()[0]).toMatchObject({
+      resource: "deferred-profile",
+      classification: "intentional-deferred",
+    });
+    expect(recorder.analyze().unexpectedWaterfalls).toBe(0);
+    recorder.stop();
+  });
   it("records fetch timings from a real query client", async () => {
     const client = makeClient();
     let clock = 1000;

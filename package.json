@@ -1,7 +1,7 @@
 {
   "name": "@p9v/core",
-  "version": "0.3.0",
-  "description": "The prefetch correctness layer for TanStack Query, with Suspense streaming, route enforcement, and waterfall Devtools.",
+  "version": "0.4.0",
+  "description": "TanStack Query prefetch integrity with query contracts, exact-key enforcement, streaming, and CI waterfall budgets.",
   "keywords": [
     "react",
     "nextjs",
@@ -50,7 +50,8 @@
   "type": "module",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "MIGRATION.md"
   ],
   "bin": {
     "p9v": "dist/cli.cjs"

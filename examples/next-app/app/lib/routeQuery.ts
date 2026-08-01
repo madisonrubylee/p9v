@@ -1,8 +1,14 @@
-import { defineRouteQuery } from "@p9v/core";
+import { defineRouteContract, defineRouteQuery } from "@p9v/core";
 import { postsResource, statsResource, userResource } from "./resources";
 import { UserCard } from "../components/UserCard";
 import { StatsPanel } from "../components/StatsPanel";
 import { PostList } from "../components/PostList";
+import {
+  BasicPostList,
+  BasicStatsPanel,
+  BasicUserCard,
+} from "../components/BasicProfile";
+import { postsQuery, statsQuery, userQuery } from "./queryContracts";
 
 /**
  * One declaration of everything the user page needs. All three resources are
@@ -17,4 +23,15 @@ export const userPageQuery = defineRouteQuery({
     postsResource(params.id),
   ],
   includes: [UserCard, StatsPanel, PostList],
+});
+
+/** The 1.0 TanStack-native path with per-query server policies. */
+export const streamingUserPageContract = defineRouteContract({
+  name: "streaming-user-page",
+  load: ({ id }: { id: string }) => [
+    { query: userQuery(id), policy: "streaming" },
+    { query: statsQuery(id), policy: "streaming" },
+    { query: postsQuery(id), policy: "streaming" },
+  ],
+  includes: [BasicUserCard, BasicStatsPanel, BasicPostList],
 });

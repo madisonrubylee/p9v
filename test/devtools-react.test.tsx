@@ -58,6 +58,7 @@ describe("P9vDevtools", () => {
       source: "server",
       sessionId: "server:test",
       routeName: "profile-page",
+      classification: "prefetched",
     });
     client.setQueryDefaults(["profile", "u1"], {
       meta: withP9vDevtoolsMeta(undefined, meta),
@@ -72,6 +73,7 @@ describe("P9vDevtools", () => {
     ).toBeTruthy();
     expect(screen.getByText("No suspected waterfall in this session")).toBeTruthy();
     expect(screen.getByTitle("profile")).toBeTruthy();
+    expect(screen.getByText("prefetched")).toBeTruthy();
   });
 
   it("shows a suspected client waterfall, copies JSON, and clears only timings", async () => {

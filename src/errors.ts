@@ -1,5 +1,6 @@
 import type { RouteScope } from "./context.js";
 import type { RouteResourceRequirement } from "./routeQuery.js";
+import type { RouteQueryRequirement } from "./routeContract.js";
 import type { Fragment } from "./types.js";
 
 /**
@@ -9,31 +10,44 @@ import type { Fragment } from "./types.js";
 export class P9vRouteConfigError extends Error {
   readonly routeName: string | undefined;
   readonly missingResources: readonly RouteResourceRequirement[];
+  readonly missingQueries: readonly RouteQueryRequirement[];
 
   constructor(args: {
     routeName: string | undefined;
-    missingResources: readonly RouteResourceRequirement[];
+    missingResources?: readonly RouteResourceRequirement[];
+    missingQueries?: readonly RouteQueryRequirement[];
   }) {
-    const { routeName, missingResources } = args;
+    const { routeName } = args;
+    const missingResources = args.missingResources ?? [];
+    const missingQueries = args.missingQueries ?? [];
     const routeLabel = routeName ? ` "${routeName}"` : "";
-    const details = missingResources.map(
+    const resourceDetails = missingResources.map(
       ({ resourceName, fragmentName, componentName }) =>
         `  - resource "${resourceName}" required by ${componentName} ` +
         `(fragment "${fragmentName}")`,
     );
+    const queryDetails = missingQueries.map(
+      ({ queryName, componentName }) =>
+        `  - query contract "${queryName}" required by ${componentName}`,
+    );
+    const usesQueryContracts = missingQueries.length > 0;
 
     super(
       [
         `[p9v] Route${routeLabel} is missing required prefetches.`,
         "",
-        ...details,
+        ...resourceDetails,
+        ...queryDetails,
         "",
-        "Fix: add each missing resource to defineRouteQuery({ root }).",
+        usesQueryContracts
+          ? "Fix: add each missing query to defineRouteContract({ load })."
+          : "Fix: add each missing resource to defineRouteQuery({ root }).",
       ].join("\n"),
     );
     this.name = "P9vRouteConfigError";
     this.routeName = routeName;
     this.missingResources = missingResources;
+    this.missingQueries = missingQueries;
   }
 }
 
@@ -55,7 +69,7 @@ export class P9vWaterfallError extends Error {
   } & (
     | {
         read: {
-          kind: "fragment" | "resource";
+          kind: "fragment" | "resource" | "query";
           name: string;
           resourceName: string;
         };
@@ -71,10 +85,13 @@ export class P9vWaterfallError extends Error {
           resourceName: args.fragment.resource.resourceName,
         };
     const resourceName = read.resourceName;
-    const readLabel =
-      read.kind === "fragment"
-        ? `fragment "${read.name}" (resource "${resourceName}"`
-        : `resource "${resourceName}"`;
+    const readLabel = (() => {
+      if (read.kind === "fragment") {
+        return `fragment "${read.name}" (resource "${resourceName}"`;
+      }
+      if (read.kind === "query") return `query contract "${read.name}"`;
+      return `resource "${resourceName}"`;
+    })();
     const readSuffix = read.kind === "fragment" ? ")" : "";
 
     const lines = [
@@ -101,10 +118,15 @@ export class P9vWaterfallError extends Error {
         `  2. If this waterfall is intentional, mark the fragment deferred:`,
         `     fragment(resource, [...], { defer: true })`,
       );
-    } else {
+    } else if (read.kind === "resource") {
       lines.push(
         `  2. If this waterfall is intentional, opt into fetching:`,
         `     useResource(resource, arg, { defer: true })`,
+      );
+    } else {
+      lines.push(
+        `  2. If this client fetch is intentional, opt in on the contract:`,
+        `     query(arg, { defer: true })`,
       );
     }
 

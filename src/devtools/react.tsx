@@ -245,6 +245,7 @@ function Summary({ session }: { session: TimingSession }): React.ReactElement {
   const { report } = session;
   const savingMs = Math.max(0, report.observedMs - report.parallelMs);
   const hasSuspectedWaterfall = report.depth > 1;
+  const hasConfirmedWaterfall = report.unexpectedWaterfalls > 0;
 
   return (
     <section
@@ -269,13 +270,21 @@ function Summary({ session }: { session: TimingSession }): React.ReactElement {
       <div
         style={{
           gridColumn: "1 / -1",
-          color: hasSuspectedWaterfall ? "#f5b942" : "#68d391",
+        color: hasConfirmedWaterfall
+          ? "#fc8181"
+          : hasSuspectedWaterfall
+            ? "#f5b942"
+            : "#68d391",
           fontSize: 11,
         }}
       >
-        {hasSuspectedWaterfall
-          ? `Suspected waterfall · depth ${report.depth}`
-          : "No suspected waterfall in this session"}
+        {hasConfirmedWaterfall
+          ? `Unexpected waterfall · ${report.unexpectedWaterfalls} contract cache miss${
+              report.unexpectedWaterfalls === 1 ? "" : "es"
+            }`
+          : hasSuspectedWaterfall
+            ? `Suspected waterfall · depth ${report.depth}`
+            : "No suspected waterfall in this session"}
       </div>
     </section>
   );
@@ -403,6 +412,17 @@ function Timeline({ session }: { session: TimingSession }): React.ReactElement {
             >
               {JSON.stringify(timing.key)}
             </code>
+            {timing.classification ? (
+              <div
+                style={{
+                  marginTop: 6,
+                  color: classificationColor(timing.classification),
+                  fontSize: 10,
+                }}
+              >
+                {timing.classification}
+              </div>
+            ) : null}
           </details>
         );
       })}
@@ -411,7 +431,13 @@ function Timeline({ session }: { session: TimingSession }): React.ReactElement {
 }
 
 function StatusDot({ report }: { report: WaterfallReport | null }): React.ReactElement {
-  const color = !report ? "#7f899f" : report.depth > 1 ? "#f5b942" : "#68d391";
+  const color = !report
+    ? "#7f899f"
+    : report.unexpectedWaterfalls > 0
+      ? "#fc8181"
+      : report.depth > 1
+        ? "#f5b942"
+        : "#68d391";
   return (
     <span
       aria-hidden="true"
@@ -459,7 +485,18 @@ function sessionLabel(session: TimingSession): string {
 
 function badgeLabel(report: WaterfallReport | null): string {
   if (!report) return "No data";
+  if (report.unexpectedWaterfalls > 0) {
+    return `${report.unexpectedWaterfalls} unexpected`;
+  }
   return report.depth > 1 ? `suspected depth ${report.depth}` : `depth ${report.depth}`;
+}
+
+function classificationColor(
+  classification: NonNullable<QueryTiming["classification"]>,
+): string {
+  if (classification === "unexpected-waterfall") return "#fc8181";
+  if (classification === "intentional-deferred") return "#63b3ed";
+  return "#68d391";
 }
 
 function statusColor(status: QueryTiming["status"], isCritical: boolean): string {

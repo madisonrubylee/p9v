@@ -2,34 +2,56 @@
 <img src="./assets/logo.png" alt="p9v logo" width="640" />
 </p>
 
-# p9v — Prevent React Query Request Waterfalls
+# p9v — TanStack Query Prefetch Integrity
 
 English | [한국어](./README.ko.md)
 
-**The prefetch correctness layer for TanStack Query and the Next.js App Router.**
+**TanStack Query knows how to prefetch. p9v makes sure you didn't forget.**
 
-p9v does not invent another way to fetch data. TanStack Query already prefetches
-and streams well. p9v connects route prefetches to their consumers so a missing
-prefetch becomes an actionable development error instead of a hidden request
-waterfall.
+p9v is a correctness layer for TanStack Query applications. It colocates query
+requirements with components, verifies that routes start those exact queries,
+and turns accidental browser cache misses into actionable development errors
+and CI failures. TanStack Query remains responsible for fetching, caching,
+Suspense, dehydration, and hydration.
 
-- **Start small** with `defineResource`, `useResource`, and `<Prefetch>`
-- **Stream pending queries** through React Suspense in RSC applications
-- **Prevent regressions** with exact query-key cache-miss errors
-- **Opt into stronger contracts** with fragments, masking, and route checks
-- **No GraphQL, code generation, or build plugin required**
+- Use ordinary `queryOptions`, `useQuery`, and `useSuspenseQuery`
+- Catch missing prefetches by contract name at compile time and exact key at runtime
+- Start blocking and streaming queries together in Next.js App Router
+- Separate prefetched, intentionally deferred, and unexpected requests in Devtools
+- Enforce route budgets with `p9v analyze`
+- Keep the v0 Resource and fragment APIs when they fit better
+
+## Why use p9v if manual prefetching is just as fast?
+
+p9v does not make a correctly written TanStack Query prefetch faster. It uses
+the same TanStack Query primitives, so equivalent runtime performance is the
+expected result:
 
 ```text
 naive nested fetching       1,202 ms
 manual TanStack prefetch      401 ms
 p9v prefetch                  401 ms
-
-Correct manual prefetching and p9v have equivalent runtime performance.
-p9v adds a reusable contract and catches regressions.
 ```
 
-Measured in the included [Next.js example](./examples/next-app) with three
-400 ms endpoints.
+The difference appears after the component tree changes. A child component can
+add or change a query without updating the route prefetch. Manual prefetching
+then regresses silently; p9v rejects the missing contract during development or
+CI before it ships.
+
+```text
+                                  today     after a missed child query
+manual TanStack prefetch          401 ms             802 ms
+p9v                               401 ms          CI failure
+```
+
+Think of p9v like a type checker for prefetch integrity, not a faster query
+client. It is most useful when multiple teams reuse components, route trees are
+large, or performance budgets must survive frequent refactors.
+
+For a small application with one or two obvious queries per page, manual
+TanStack prefetching may be simpler and p9v may not be necessary. The goal is
+to make that trade-off explicit rather than claim a performance advantage that
+does not exist.
 
 ## Install
 
@@ -37,52 +59,69 @@ Measured in the included [Next.js example](./examples/next-app) with three
 npm install @p9v/core @tanstack/react-query
 ```
 
-Requires React 18 or 19 and TanStack Query 5.
+React 18 or 19 and TanStack Query 5 are supported.
 
 ## Quick start
 
-### 1. Define a resource
+### 1. Add identity to ordinary TanStack options
 
 ```ts
-import { defineResource } from "@p9v/core";
+import { queryOptions } from "@tanstack/react-query";
+import { defineQueryContract } from "@p9v/core";
 
-export const userResource = defineResource({
+export const userQuery = defineQueryContract({
   name: "user",
-  key: (id: string) => ["user", id] as const,
-  fetch: (id) => api.get<User>(`/users/${id}`),
+  options: (id: string) =>
+    queryOptions({
+      queryKey: ["user", id] as const,
+      queryFn: () => api.get<User>(`/users/${id}`),
+    }),
 });
 ```
 
-Resource names must be unique within an application.
+`defineQueryContract` preserves the TanStack options type. It also supports
+`infiniteQueryOptions`; p9v selects `prefetchInfiniteQuery` automatically.
 
-### 2. Read it in a component
+### 2. Colocate the requirement with its consumer
 
 ```tsx
-import { useResource } from "@p9v/core/react";
+"use client";
 
-export function UserCard({ userId }: { userId: string }) {
-  const user = useResource(userResource, userId);
-  return <span>{user.name}</span>;
-}
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { withQueryRequirements } from "@p9v/core";
+
+export const UserCard = withQueryRequirements(
+  [userQuery],
+  function UserCard({ userId }: { userId: string }) {
+    const { data } = useSuspenseQuery(userQuery(userId));
+    return <span>{data.name}</span>;
+  },
+);
 ```
 
-`useResource` reads the complete value from the hydrated cache. In development,
-a genuine cache miss throws `P9vWaterfallError` with the exact query key and
-responsible component instead of silently starting a request.
+The consumer still uses TanStack Query directly. If `userQuery(userId)` is not
+in the hydrated cache, development strict mode throws `P9vWaterfallError` with
+the exact key instead of silently starting a browser waterfall.
 
-### 3. Prefetch at the route
+### 3. Define and execute the route contract
 
 ```tsx
+import { defineRouteContract } from "@p9v/core";
 import { Prefetch } from "@p9v/core/server";
+
+export const userPage = defineRouteContract({
+  name: "user-page",
+  load: ({ id }: { id: string }) => [
+    { query: userQuery(id), policy: "blocking" },
+    { query: statsQuery(id), policy: "streaming" },
+  ],
+  includes: [UserCard, StatsPanel],
+});
 
 export default async function Page({ params }) {
   const { id } = await params;
-
   return (
-    <Prefetch
-      resources={[userResource(id), statsResource(id)]}
-      name="user-page"
-    >
+    <Prefetch contract={userPage} params={{ id }}>
       <UserCard userId={id} />
       <StatsPanel userId={id} />
     </Prefetch>
@@ -90,85 +129,36 @@ export default async function Page({ params }) {
 }
 ```
 
-The default `mode="blocking"` waits for every resource in parallel. To pass
-pending queries to nested Suspense boundaries instead, use streaming mode:
+All entries start before p9v waits. `blocking` entries delay the server
+boundary; `streaming` entries are dehydrated with their pending Promise for an
+RSC-capable framework such as Next.js App Router. A component requirement
+missing from `load` fails TypeScript and development route validation.
 
-```tsx
-<Prefetch resources={[userResource(id)]} mode="streaming">
-  <Suspense fallback={<UserCardSkeleton />}>
-    <UserCard userId={id} />
-  </Suspense>
-</Prefetch>
-```
+If the route loads `userQuery("u1")` while the component reads
+`userQuery("u2")`, the exact-key cache miss is still caught at runtime.
 
-Streaming mode requires an RSC framework that can serialize Promises, such as
-the Next.js App Router. Blocking remains the portable default.
+## Intentional client queries
 
-## Strong contracts when you need them
+Strict contract queries do not begin unexpectedly in the development browser.
+Opt in at the contract or call site when a client fetch is intentional:
 
-Fragments add field masking and compile-time route completeness without making
-them part of the beginner path:
-
-```tsx
-import { defineRouteQuery, fragment, withFragments } from "@p9v/core";
-import { useFragment } from "@p9v/core/react";
-
-const UserCard_user = fragment(userResource, ["id", "name", "avatarUrl"]);
-
-export const UserCard = withFragments(
-  [UserCard_user],
-  function UserCard({ userId }: { userId: string }) {
-    const user = useFragment(UserCard_user, userId);
-    return <span>{user.name}</span>;
-  },
-);
-
-const userPageQuery = defineRouteQuery({
-  name: "user-page",
-  root: ({ id }: { id: string }) => [userResource(id)],
-  includes: [UserCard],
+```ts
+const searchQuery = defineQueryContract({
+  name: "search",
+  defer: true,
+  options: (term: string) => queryOptions({ /* ... */ }),
 });
+
+useSuspenseQuery(userQuery(id, { defer: true }));
 ```
 
-TypeScript verifies that every resource required by `includes` exists in
-`root`. `useFragment` exposes only declared fields and applies a development-only
-runtime mask. The existing `Component.fragments = [...] as const` syntax remains
-supported.
+Production keeps the safe TanStack fetch fallback. Deferred requests are marked
+`intentional-deferred`; missing strict contracts are marked
+`unexpected-waterfall`; server route entries are marked `prefetched`.
 
-`<Prefetch>` fetches the route's resources in parallel on the server, then
-dehydrates and hydrates the TanStack Query cache. `useFragment` reads that cache;
-it never starts an accidental request in development.
+## Devtools and CI budgets
 
-## Why p9v?
-
-Component-level fetching is easy to maintain, but nested components can create
-serial requests. Moving every request to the route fixes performance while
-duplicating each component's data requirements.
-
-p9v is the enforcement layer on top of the existing TanStack primitives:
-
-| Approach                  | Colocated requirements | Parallel fetching |      Prevents waterfalls      |
-| ------------------------- | :--------------------: | :---------------: | :---------------------------: |
-| Fetch inside components   |          Yes           |        No         |              No               |
-| Manual TanStack prefetch  |           No           |        Yes        |              No               |
-| Waterfall detection tools |          Yes           |        No         |   No — warns after the fact   |
-| **p9v**                   |        **Yes**         |      **Yes**      | **Yes, for declared routes** |
-
-The optional strict-contract model follows three rules:
-
-1. **Declare** fields with `fragment(resource, fields)`.
-2. **Mask** component data to those fields.
-3. **Enforce** resource coverage at route definition and exact query-key
-   coverage when `useFragment` reads the cache.
-
-This brings Relay-style fragment colocation and data masking to REST APIs and
-TanStack Query—without adopting GraphQL. It directly addresses the prefetching
-and code-colocation trade-off discussed by the
-[TanStack Query maintainers](https://github.com/TanStack/query/discussions/8064).
-
-## Find existing React Query waterfalls
-
-Mount the browser Devtools once inside your `QueryClientProvider`:
+Mount the panel inside `QueryClientProvider`:
 
 ```tsx
 import { P9vDevtools } from "@p9v/core/devtools/react";
@@ -179,106 +169,72 @@ import { P9vDevtools } from "@p9v/core/devtools/react";
 </QueryClientProvider>;
 ```
 
-The floating panel displays p9v `<Prefetch>` server resources and browser-side
-TanStack Query requests as separate timing sessions. It shows the suspected
-critical path, observed versus parallel time, query keys, and JSON that remains
-compatible with the CLI. General raw RSC `fetch` calls are outside its scope.
+The panel separates contract-backed classifications from timing-based suspected
+waterfalls. Save `WaterfallRecorder.toJSON()` to `p9v.record.json`, then add an
+optional `p9v.config.json`:
 
-The panel and server timing collection are enabled by default only in
-development. To diagnose an explicitly authorized production session, enable
-both sides:
-
-```tsx
-<Prefetch query={pageQuery} params={params} devtools>
-  {children}
-</Prefetch>
-
-<P9vDevtools enabled />
-```
-
-The headless recorder remains available for custom integrations:
-
-```ts
-import { WaterfallRecorder } from "@p9v/core/devtools";
-
-const recorder = new WaterfallRecorder(queryClient).start();
-// Exercise the page, then save recorder.toJSON() as p9v.record.json.
+```json
+{
+  "maxUnexpectedWaterfalls": 0,
+  "maxDepth": 1,
+  "maxCriticalPathMs": 500,
+  "routes": {
+    "dashboard": { "maxCriticalPathMs": 400 }
+  }
+}
 ```
 
 ```bash
 npx p9v analyze
+npx p9v analyze artifacts/profile.json --config config/p9v.json
 ```
 
-```text
-[p9v] Waterfall detected — depth 2
-      observed 720ms → ~410ms if parallelized
+The command exits non-zero when a configured global or per-route budget is
+exceeded. Without a config it retains the legacy behavior and fails on an
+inferred waterfall deeper than one request.
 
-  ▶ UserCard  · user   █████████████████ 300ms
-  ▶ UserPosts · team                    ███████████████████████ 410ms
+## Existing Resource and fragment APIs
+
+The 0.3 APIs remain supported in 0.4:
+
+```tsx
+const userResource = defineResource({
+  name: "user",
+  key: (id: string) => ["user", id] as const,
+  fetch: (id) => fetchUser(id),
+});
+
+<Prefetch resources={[userResource(id)]} mode="streaming">
+  <UserCard userId={id} />
+</Prefetch>;
 ```
 
-The command exits with a non-zero status when it finds a waterfall, so it can run
-in CI.
+Use `defineResource`/`useResource` for the smallest p9v-owned API, and
+`fragment`/`useFragment` when field masking is valuable. See
+[the 0.4 adoption guide](./MIGRATION.md); no 0.3 call site has to migrate.
 
-## API overview
+## API and package entry points
 
-| API                          | Purpose                                        |
-| ---------------------------- | ---------------------------------------------- |
-| `defineResource(...)`        | Define a fetcher, query key, and cache options |
-| `useResource(resource, arg)` | Read a complete prefetched resource            |
-| `fragment(resource, fields)` | Declare and type-mask a component's fields     |
-| `withFragments(...)`         | Attach fragment metadata without a later assignment |
-| `defineRouteQuery(...)`      | List route resources and included components   |
-| `useFragment(fragment, arg)` | Reactively read prefetched, masked cache data  |
-| `<Prefetch ...>`             | Block on or stream direct/route resources      |
-| `WaterfallRecorder`          | Record and analyze query timing in development |
-| `P9vDevtools`                | Inspect server/client timings in the browser   |
-| `P9vRouteConfigError`        | Describe missing route resource prefetches     |
-
-### Package entry points
-
-| Import               | Environment | Main exports                                       |
-| -------------------- | ----------- | -------------------------------------------------- |
-| `@p9v/core`          | Server-safe | `defineResource`, `fragment`, `withFragments`, `defineRouteQuery` |
-| `@p9v/core/react`    | Client      | `useResource`, `useFragment`, `P9vProvider`, `RouteQueryProvider` |
-| `@p9v/core/server`   | Server      | `Prefetch`, `getServerQueryClient`                 |
-| `@p9v/core/devtools` | Any         | Recorder, analysis, and reporting utilities        |
-| `@p9v/core/devtools/react` | Client | Browser `P9vDevtools` panel                         |
-
-## Strict mode
-
-In development, `<Prefetch>` throws `P9vRouteConfigError` before fetching when
-an included component's resource is absent from `root`. A cache miss for an
-exact query key throws `P9vWaterfallError`; on React 19.1+, that error also
-identifies the responsible component through owner stacks.
-
-Production defaults to a safe fetch-and-suspend fallback. To intentionally defer
-a request in development, pass `{ defer: true }` to `useResource` or its
-fragment. You can override strict behavior for a subtree with
-`<P9vProvider strict={...}>`.
-
-Field masking uses a development-only `Proxy`; it adds no production runtime
-overhead.
+| Import | Main APIs |
+| --- | --- |
+| `@p9v/core` | `defineQueryContract`, `withQueryRequirements`, `defineRouteContract`, legacy Resource/fragment APIs |
+| `@p9v/core/react` | `RouteContractProvider`, `P9vProvider`, legacy read hooks |
+| `@p9v/core/server` | Next.js/RSC `<Prefetch>`, `getServerQueryClient` |
+| `@p9v/core/devtools` | recorder, timing analysis, `evaluateBudgets` |
+| `@p9v/core/devtools/react` | browser `P9vDevtools` panel |
 
 ## Development
 
 ```bash
 pnpm install
-pnpm build
-pnpm test
 pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:package
 ```
 
-See the [benchmark and demo instructions](./examples/next-app/README.md) to run
-the Next.js example locally.
-
-## Roadmap
-
-- Build-time fragment auto-hoisting
-- Sparse REST fieldsets
-- Per-item masking for list resources
-- Missing-prefetch codemod
-- Normalized cache and invalidation graph
+The included [Next.js example](./examples/next-app) demonstrates blocking,
+streaming, and browser waterfall diagnostics.
 
 ## License
 

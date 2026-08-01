@@ -1,10 +1,6 @@
 import { Suspense } from "react";
 import { Prefetch } from "@p9v/core/server";
-import {
-  postsResource,
-  statsResource,
-  userResource,
-} from "../../lib/resources";
+import { streamingUserPageContract } from "../../lib/routeQuery";
 import {
   BasicPostList,
   BasicStatsPanel,
@@ -23,16 +19,7 @@ export default async function StreamingUserPage({
 }) {
   const { id } = await params;
   return (
-    <Prefetch
-      resources={[
-        userResource(id),
-        statsResource(id),
-        postsResource(id),
-      ]}
-      name="streaming-user-page"
-      mode="streaming"
-      devtools
-    >
+    <Prefetch contract={streamingUserPageContract} params={{ id }} devtools>
       <Page heading="p9v — Suspense streaming">
         <Suspense fallback={<LoadingCard label="profile" />}>
           <BasicUserCard id={id} />

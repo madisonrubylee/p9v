@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -54,6 +54,7 @@ try {
     "dist/devtools/react.cjs",
     "dist/devtools/react.d.ts",
     "dist/cli.cjs",
+    "MIGRATION.md",
   ]) {
     if (!packedFiles.has(requiredFile)) {
       throw new Error(`Packed artifact is missing ${requiredFile}.`);
@@ -126,12 +127,12 @@ try {
   writeFileSync(
     typeSmokeFile,
     [
-      'import { defineResource, defineRouteQuery, withFragments, P9vRouteConfigError, type RouteQuery } from "@p9v/core";',
-      'import { useFragment, useResource } from "@p9v/core/react";',
+      'import { defineQueryContract, defineRouteContract, withQueryRequirements, defineResource, defineRouteQuery, withFragments, P9vRouteConfigError, type RouteQuery } from "@p9v/core";',
+      'import { RouteContractProvider, useFragment, useResource } from "@p9v/core/react";',
       'import { Prefetch } from "@p9v/core/server";',
       'import { WaterfallRecorder } from "@p9v/core/devtools";',
       'import { P9vDevtools } from "@p9v/core/devtools/react";',
-      "void defineResource; void defineRouteQuery; void withFragments; void P9vRouteConfigError; void useFragment; void useResource;",
+      "void defineQueryContract; void defineRouteContract; void withQueryRequirements; void RouteContractProvider; void defineResource; void defineRouteQuery; void withFragments; void P9vRouteConfigError; void useFragment; void useResource;",
       "void Prefetch; void WaterfallRecorder; void P9vDevtools;",
       "type SmokeRoute = RouteQuery<{ id: string }>;",
       "const route = null as unknown as SmokeRoute; void route;",
@@ -176,8 +177,68 @@ try {
     [join(packageDirectory, "dist/cli.cjs"), "--help"],
     { encoding: "utf8" },
   );
-  if (!cliOutput.includes("p9v — Prefetch → View")) {
+  if (!cliOutput.includes("p9v — TanStack Query Prefetch Integrity")) {
     throw new Error("The packed CLI did not print its help output.");
+  }
+
+  writeFileSync(
+    join(consumerDirectory, "p9v.record.json"),
+    JSON.stringify([
+      {
+        keyHash: '["profile"]',
+        key: ["profile"],
+        resource: "profile",
+        owner: null,
+        startedAt: 0,
+        settledAt: 100,
+        status: "success",
+        sessionId: "server:smoke",
+        routeName: "profile",
+        classification: "prefetched",
+      },
+    ]),
+  );
+  writeFileSync(
+    join(consumerDirectory, "p9v.config.json"),
+    JSON.stringify({ maxUnexpectedWaterfalls: 0, maxDepth: 1 }),
+  );
+  const analyzeOutput = execFileSync(
+    process.execPath,
+    [join(packageDirectory, "dist/cli.cjs"), "analyze"],
+    { cwd: consumerDirectory, encoding: "utf8" },
+  );
+  if (!analyzeOutput.includes("All configured budgets passed")) {
+    throw new Error("The packaged CLI did not enforce the passing budget.");
+  }
+
+  writeFileSync(
+    join(consumerDirectory, "p9v.record.json"),
+    JSON.stringify([
+      {
+        keyHash: '["profile"]',
+        key: ["profile"],
+        resource: "profile",
+        owner: null,
+        startedAt: 0,
+        settledAt: 100,
+        status: "error",
+        sessionId: "client:smoke",
+        routeName: "profile",
+        classification: "unexpected-waterfall",
+      },
+    ]),
+  );
+  writeFileSync(
+    join(consumerDirectory, "p9v.config.json"),
+    JSON.stringify({ maxUnexpectedWaterfalls: 0 }),
+  );
+  const failedBudget = spawnSync(
+    process.execPath,
+    [join(packageDirectory, "dist/cli.cjs"), "analyze"],
+    { cwd: consumerDirectory, encoding: "utf8" },
+  );
+  if (failedBudget.status !== 1 || !failedBudget.stderr.includes("budget violation")) {
+    throw new Error("The packaged CLI did not fail a violated budget.");
   }
 
   process.stdout.write(
