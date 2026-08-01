@@ -21,11 +21,52 @@ Suspense, dehydration, and hydration.
 - Enforce route budgets with `p9v analyze`
 - Keep the v0 Resource and fragment APIs when they fit better
 
-## Why use p9v if manual prefetching is just as fast?
+## Why p9v?
 
-p9v does not make a correctly written TanStack Query prefetch faster. It uses
-the same TanStack Query primitives, so equivalent runtime performance is the
-expected result:
+### Prefetching has two owners that can drift apart
+
+With component-level TanStack Query, the component owns what data it consumes,
+while the route owns what data starts early. TanStack Query provides excellent
+prefetch primitives, but those two declarations are not connected by default.
+
+Consider a page that correctly prefetches `userQuery`. Later, `UserCard` starts
+rendering `teamQuery`, or changes `userQuery("u1")` to `userQuery("u2")`:
+
+```text
+route                        component tree
+prefetch user:u1             UserCard
+                               ├─ read user:u1
+                               └─ read team:t1   ← added during a refactor
+```
+
+The page still works because TanStack Query safely fetches the missing data in
+the browser. Functional tests can keep passing while the page quietly gains
+another network round trip. The correctness fallback hides the performance
+regression.
+
+### p9v makes that silent regression fail loudly
+
+p9v connects the route declaration to its consumers and checks the relationship
+at three points:
+
+1. **Type checking:** a declared component query missing from the route contract
+   fails TypeScript.
+2. **Development runtime:** a wrong or missing exact query key throws
+   `P9vWaterfallError` before becoming a hidden browser waterfall.
+3. **CI:** recorded `unexpected-waterfall`, depth, and critical-path budgets can
+   fail a pull request before deployment.
+
+| After a child query changes | Manual TanStack prefetch | p9v contract |
+| --- | --- | --- |
+| UI still renders | Yes | Yes in production |
+| Missing exact key is visible during development | Only through manual inspection | Immediate error |
+| Route/component coverage is type-checked | No | Yes |
+| Regression can fail CI | Custom tooling required | Built in |
+
+### p9v protects speed; it does not invent a faster cache
+
+p9v runs TanStack Query's own primitives. A correct manual prefetch and p9v
+therefore have equivalent runtime performance:
 
 ```text
 naive nested fetching       1,202 ms
@@ -33,25 +74,12 @@ manual TanStack prefetch      401 ms
 p9v prefetch                  401 ms
 ```
 
-The difference appears after the component tree changes. A child component can
-add or change a query without updating the route prefetch. Manual prefetching
-then regresses silently; p9v rejects the missing contract during development or
-CI before it ships.
-
-```text
-                                  today     after a missed child query
-manual TanStack prefetch          401 ms             802 ms
-p9v                               401 ms          CI failure
-```
-
-Think of p9v like a type checker for prefetch integrity, not a faster query
-client. It is most useful when multiple teams reuse components, route trees are
-large, or performance budgets must survive frequent refactors.
+The value is keeping the last line at 401 ms as components move and queries
+change. p9v is most useful for shared component libraries, large route trees,
+multi-team applications, and codebases with enforced performance budgets.
 
 For a small application with one or two obvious queries per page, manual
-TanStack prefetching may be simpler and p9v may not be necessary. The goal is
-to make that trade-off explicit rather than claim a performance advantage that
-does not exist.
+TanStack prefetching is usually simpler and p9v may not be necessary.
 
 ## Install
 

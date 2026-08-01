@@ -20,10 +20,52 @@ Suspense, dehydration과 hydration은 계속 TanStack Query가 담당합니다.
 - `p9v analyze`로 route 성능 예산을 CI에서 강제
 - 기존 Resource와 fragment API도 0.4에서 호환 유지
 
-## 수동 prefetch와 속도가 같은데 왜 p9v를 쓰나요?
+## Why p9v?
 
-p9v는 올바르게 작성된 TanStack Query prefetch를 더 빠르게 만들지 않습니다.
-동일한 TanStack Query primitive를 실행하므로 성능이 같은 것이 정상입니다.
+### Prefetch 선언과 데이터 소비는 서로 다른 곳에서 관리됩니다
+
+컴포넌트 수준 TanStack Query에서는 컴포넌트가 어떤 데이터를 읽을지 결정하고,
+route가 어떤 데이터를 미리 시작할지 결정합니다. TanStack Query는 훌륭한
+prefetch primitive를 제공하지만, 기본적으로 이 두 선언의 일치까지 보장하지는
+않습니다.
+
+처음에는 route가 `userQuery`를 올바르게 prefetch했다고 가정해 보겠습니다. 이후
+`UserCard`가 `teamQuery`를 추가하거나 `userQuery("u1")`을
+`userQuery("u2")`로 변경합니다.
+
+```text
+route                        component tree
+prefetch user:u1             UserCard
+                               ├─ read user:u1
+                               └─ read team:t1   ← 리팩터링 중 추가
+```
+
+TanStack Query가 브라우저에서 누락된 데이터를 안전하게 가져오기 때문에 화면은
+계속 정상 동작합니다. 기능 테스트도 통과하지만, 페이지에는 네트워크 왕복이 하나
+더 생깁니다. 안정성을 위한 fallback이 성능 회귀를 숨기게 됩니다.
+
+### p9v는 조용한 성능 회귀를 명확한 실패로 바꿉니다
+
+p9v는 route 선언과 실제 소비자를 연결하고 세 지점에서 검증합니다.
+
+1. **타입 검사:** 컴포넌트가 선언한 query가 route contract에서 빠지면
+   TypeScript가 실패합니다.
+2. **개발 런타임:** 잘못됐거나 누락된 정확한 query key는 숨은 브라우저
+   waterfall이 되기 전에 `P9vWaterfallError`를 발생시킵니다.
+3. **CI:** 기록된 `unexpected-waterfall`, depth, critical-path budget을 기준으로
+   배포 전 PR을 실패시킬 수 있습니다.
+
+| 자식 query가 변경된 이후 | 수동 TanStack prefetch | p9v contract |
+| --- | --- | --- |
+| 화면이 계속 동작하는가 | 예 | 프로덕션에서는 예 |
+| 개발 중 정확한 key 누락이 보이는가 | 직접 확인해야 함 | 즉시 오류 |
+| route와 component의 계약을 타입 검사하는가 | 아니요 | 예 |
+| 회귀를 CI에서 차단할 수 있는가 | 별도 도구 필요 | 기본 제공 |
+
+### p9v는 더 빠른 cache를 만들지 않고 기존 속도를 지킵니다
+
+p9v는 TanStack Query 자체 primitive를 실행합니다. 따라서 올바른 수동 prefetch와
+p9v의 실행 성능이 같은 것이 정상입니다.
 
 ```text
 중첩된 순차 요청               1,202 ms
@@ -31,23 +73,12 @@ p9v는 올바르게 작성된 TanStack Query prefetch를 더 빠르게 만들지
 p9v 병렬 prefetch                401 ms
 ```
 
-차이는 컴포넌트 트리가 변경된 뒤에 나타납니다. 자식 컴포넌트가 query를 추가하거나
-key를 바꾸고 route prefetch를 갱신하지 않으면, 수동 방식은 조용히 waterfall로
-회귀합니다. p9v는 이 누락을 개발 환경이나 CI에서 배포 전에 실패시킵니다.
-
-```text
-                              현재      자식 query 누락 이후
-수동 TanStack prefetch        401 ms              802 ms
-p9v                           401 ms           CI 실패
-```
-
-p9v는 더 빠른 query client라기보다 **prefetch 무결성을 위한 타입 검사기**에
-가깝습니다. 여러 팀이 공용 컴포넌트를 재사용하거나, route tree가 크거나, 잦은
-리팩터링 속에서도 성능 budget을 지켜야 할 때 가치가 있습니다.
+p9v의 가치는 컴포넌트가 이동하고 query가 변경된 뒤에도 마지막 401ms를 유지하는
+것입니다. 공용 컴포넌트가 많거나, route tree가 크거나, 여러 팀이 함께 개발하거나,
+성능 budget을 강제하는 코드베이스에서 가장 유용합니다.
 
 페이지마다 명확한 query가 한두 개뿐인 작은 애플리케이션이라면 수동 TanStack
-prefetch가 더 단순하며 p9v가 필요하지 않을 수 있습니다. p9v는 존재하지 않는
-속도 우위를 주장하지 않고 이 선택 기준을 명확히 합니다.
+prefetch가 더 단순하며 p9v가 필요하지 않을 수 있습니다.
 
 ## 설치
 
