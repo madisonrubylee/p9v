@@ -1,7 +1,7 @@
 {
   "name": "@p9v/core",
-  "version": "0.2.0",
-  "description": "Prefetch → View. A Relay-style REST + TanStack Query data layer with route enforcement and browser waterfall Devtools.",
+  "version": "0.3.0",
+  "description": "The prefetch correctness layer for TanStack Query, with Suspense streaming, route enforcement, and waterfall Devtools.",
   "keywords": [
     "react",
     "nextjs",

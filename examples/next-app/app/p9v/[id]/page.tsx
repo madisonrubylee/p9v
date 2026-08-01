@@ -18,7 +18,7 @@ export default async function P9vUserPage({
   const { id } = await params;
   return (
     <Prefetch query={userPageQuery} params={{ id }} devtools>
-      <Page heading="p9v — parallel prefetch">
+      <Page heading="p9v — strict blocking prefetch">
         <UserCard id={id} />
         <StatsPanel id={id} />
         <PostList id={id} />

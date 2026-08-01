@@ -14,7 +14,11 @@ export default function Home() {
           waterfall (sequential)
         </li>
         <li>
-          <Link href="/p9v/u1">/p9v/u1</Link> — p9v parallel prefetch
+          <Link href="/p9v/u1">/p9v/u1</Link> — strict blocking prefetch
+        </li>
+        <li>
+          <Link href="/p9v-streaming/u1">/p9v-streaming/u1</Link> — basic API
+          with Suspense streaming
         </li>
         <li>
           <Link href="/client-waterfall/u1">/client-waterfall/u1</Link> —
@@ -22,7 +26,8 @@ export default function Home() {
         </li>
       </ul>
       <p style={{ opacity: 0.6 }}>
-        Run <code>pnpm bench</code> to measure both.
+        Run <code>node bench-core.mjs</code> to compare nested, manual TanStack,
+        and p9v prefetching.
       </p>
     </Page>
   );

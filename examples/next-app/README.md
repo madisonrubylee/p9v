@@ -1,14 +1,15 @@
-# p9v example — waterfall vs parallel prefetch
+# p9v example — strict blocking and Suspense streaming
 
 The same profile screen (user + stats + posts, each endpoint delayed 400ms),
-built two ways:
+built several ways:
 
 - `/vanilla/[id]` — the classic **nested component waterfall**: each async
   section awaits its own data before the next one starts. Three 400ms requests
   run back-to-back.
-- `/p9v/[id]` — a single `defineRouteQuery` prefetches all three resources **in
-  parallel** via `<Prefetch>`; the components read from the hydrated cache with
-  `useFragment` and never trigger their own fetches.
+- `/p9v/[id]` — the strict API combines `defineRouteQuery`, `withFragments`, and
+  blocking parallel prefetch.
+- `/p9v-streaming/[id]` — the beginner API passes resources directly, dehydrates
+  pending queries, and lets three Suspense boundaries stream independently.
 - `/client-waterfall/[id]` — three nested browser-side TanStack Query requests
 used to demonstrate the p9v Devtools suspected-waterfall timeline.
 
@@ -24,7 +25,8 @@ pnpm build
 pnpm start          # http://localhost:3100
 ```
 
-Open `/p9v/u1` to see a parallel Server session in the p9v Devtools panel, or
+Open `/p9v/u1` to see a completed blocking Server session,
+`/p9v-streaming/u1` to see pending server timings settle through hydration, or
 `/client-waterfall/u1` to see a depth-three Client session. The original
 `/vanilla/u1` route remains a raw RSC fetch benchmark and is intentionally not
 instrumented by the panel.
@@ -35,7 +37,7 @@ Two benchmarks are included:
 
 ```bash
 # 1) In-process data-layer benchmark — no server needed.
-#    Exercises the real p9v resources + QueryClient.prefetchQuery + dehydrate.
+#    Compares nested requests, correct manual TanStack prefetching, and p9v.
 node bench-core.mjs
 
 # 2) Full server-render benchmark — requires `pnpm start` running.
@@ -46,9 +48,11 @@ Representative `bench-core.mjs` output (400ms/endpoint):
 
 ```
   vanilla (nested waterfall)   1202 ms
+  manual TanStack (parallel)     401 ms
   p9v (parallel prefetch)       401 ms
 
-  → p9v is 3.00x faster (801ms saved)
+  → Correct manual TanStack and p9v have equivalent parallel performance.
+    p9v adds a reusable contract and catches missing prefetches.
 ```
 
 ### Optional: browser LCP with Playwright

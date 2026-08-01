@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
   QueryClient,
+  defaultShouldDehydrateQuery,
   dehydrate,
   HydrationBoundary,
   hashKey,
@@ -8,6 +9,7 @@ import {
   type QueryFunction,
 } from "@tanstack/react-query";
 import type { RouteQuery } from "../routeQuery.js";
+import type { ResourceInstance } from "../types.js";
 import { findMissingRouteRequirements } from "../routeQuery.js";
 import { P9vRouteConfigError } from "../errors.js";
 import {
@@ -35,17 +37,39 @@ export const getServerQueryClient: () => QueryClient = (() => {
   return cache ? cache(makeQueryClient) : makeQueryClient;
 })();
 
-export interface PrefetchProps<TParams> {
-  query: RouteQuery<TParams>;
-  params: TParams;
+interface SharedPrefetchProps {
   children: React.ReactNode;
+  /** Wait for data (default) or pass pending queries to a Suspense boundary. */
+  mode?: "blocking" | "streaming";
   /** Collect server resource timings for `P9vDevtools`. Defaults to dev-only. */
   devtools?: boolean;
 }
 
+export interface RoutePrefetchProps<TParams> extends SharedPrefetchProps {
+  query: RouteQuery<TParams>;
+  params: TParams;
+  resources?: never;
+  name?: never;
+}
+
+export interface ResourcePrefetchProps extends SharedPrefetchProps {
+  /** Resource instances to start together without declaring a route query. */
+  resources: readonly ResourceInstance<any, any>[];
+  /** Optional route label shown in Devtools. */
+  name?: string;
+  query?: never;
+  params?: never;
+}
+
+export type PrefetchProps<TParams = unknown> =
+  | RoutePrefetchProps<TParams>
+  | ResourcePrefetchProps;
+
 /**
- * Server component that prefetches a route's root resources **in parallel**,
- * dehydrates the cache, and hydrates it on the client. This absorbs the
+ * Server component that starts resources **in parallel**, dehydrates the
+ * cache, and hydrates it on the client. It accepts either a reusable route
+ * query or direct resource instances. Streaming mode dehydrates pending query
+ * promises for RSC frameworks that can serialize them. This absorbs the
  * `getQueryClient` / `Promise.all(prefetchQuery)` / `dehydrate` /
  * `HydrationBoundary` boilerplate that every App Router page repeats.
  *
@@ -63,27 +87,31 @@ export interface PrefetchProps<TParams> {
 export async function Prefetch<TParams>(
   props: PrefetchProps<TParams>,
 ): Promise<React.ReactElement> {
-  const { query, params, children } = props;
+  const { children } = props;
   const shouldCollectDevtoolsTimings = props.devtools ?? !isProd;
   const client = getServerQueryClient();
+  const mode = props.mode ?? "blocking";
+  const isRouteQuery = "query" in props && props.query !== undefined;
+  const routeName = isRouteQuery ? props.query.name : props.name;
+  const instances = isRouteQuery
+    ? props.query.getRootInstances(props.params)
+    : props.resources;
 
-  const instances = query.getRootInstances(params);
-  if (!isProd) {
+  if (!isProd && isRouteQuery) {
     const missingResources = findMissingRouteRequirements(
       instances,
-      query.requiredResources,
+      props.query.requiredResources,
     );
     if (missingResources.length > 0) {
       throw new P9vRouteConfigError({
-        routeName: query.name,
+        routeName,
         missingResources,
       });
     }
   }
   const sessionId = `server:${Date.now()}:${++serverSessionSequence}`;
 
-  await Promise.all(
-    instances.map((instance, index) => {
+  const prefetches = instances.map((instance, index) => {
       if (!shouldCollectDevtoolsTimings) {
         return client.prefetchQuery(instance.queryOptions);
       }
@@ -94,7 +122,7 @@ export async function Prefetch<TParams>(
       }
       const devtoolsMeta = createP9vDevtoolsMeta({
         sessionId,
-        routeName: query.name ?? null,
+        routeName: routeName ?? null,
       });
 
       const instrumentedQueryFn: QueryFunction<unknown> = async (context) => {
@@ -110,7 +138,7 @@ export async function Prefetch<TParams>(
           status: "pending",
           source: "server",
           sessionId,
-          routeName: query.name ?? null,
+          routeName: routeName ?? null,
         };
         devtoolsMeta.timings.push(timing);
 
@@ -136,12 +164,24 @@ export async function Prefetch<TParams>(
           devtoolsMeta,
         ),
       });
-    }),
+  });
+
+  if (mode === "blocking") {
+    await Promise.all(prefetches);
+  }
+
+  const state: DehydratedState = dehydrate(
+    client,
+    mode === "streaming"
+      ? {
+          shouldDehydrateQuery: (query) =>
+            defaultShouldDehydrateQuery(query) ||
+            query.state.status === "pending",
+        }
+      : undefined,
   );
 
-  const state: DehydratedState = dehydrate(client);
-
-  // Only the client-side cache needs hydrating; `useFragment` reads from it.
+  // Only the client-side cache needs hydrating; the read hooks consume it.
   // For friendlier waterfall errors ("route X doesn't prefetch Y"), wrap your
   // client subtree in <RouteQueryProvider> from "@p9v/core/react" — it is optional and
   // additive, so we don't force a client boundary here.

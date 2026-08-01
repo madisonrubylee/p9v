@@ -169,4 +169,92 @@ describe("WaterfallRecorder", () => {
     expect(recorder.getSnapshot().timings).toHaveLength(0);
     recorder.stop();
   });
+
+  it("settles a hydrated pending server timing without a duplicate client timing", async () => {
+    const client = makeClient();
+    let clock = 100;
+    let resolveRequest!: (value: string) => void;
+    const meta = createP9vDevtoolsMeta({
+      sessionId: "server:stream",
+      routeName: "streaming-page",
+    });
+    meta.timings.push({
+      id: "server:stream:profile",
+      keyHash: '["streaming-profile"]',
+      key: ["streaming-profile"],
+      resource: "streaming-profile",
+      owner: null,
+      startedAt: clock,
+      settledAt: null,
+      status: "pending",
+      source: "server",
+      sessionId: "server:stream",
+      routeName: "streaming-page",
+    });
+    client.setQueryDefaults(["streaming-profile"], {
+      meta: withP9vDevtoolsMeta(undefined, meta),
+    });
+    const request = client.fetchQuery({
+      queryKey: ["streaming-profile"],
+      queryFn: () =>
+        new Promise<string>((resolve) => { resolveRequest = resolve; }),
+    });
+    const recorder = new WaterfallRecorder(client, {
+      now: () => clock,
+    }).start();
+
+    expect(recorder.getTimings()).toHaveLength(1);
+    expect(recorder.getTimings()[0]).toMatchObject({
+      source: "server",
+      status: "pending",
+      settledAt: null,
+    });
+
+    clock = 450;
+    resolveRequest("done");
+    await request;
+
+    expect(recorder.getTimings()).toHaveLength(1);
+    expect(recorder.getTimings()[0]).toMatchObject({
+      source: "server",
+      status: "success",
+      settledAt: 450,
+    });
+
+    const errorMeta = createP9vDevtoolsMeta({
+      sessionId: "server:stream-error",
+      routeName: "streaming-page",
+    });
+    errorMeta.timings.push({
+      id: "server:stream:error",
+      keyHash: '["streaming-error"]',
+      key: ["streaming-error"],
+      resource: "streaming-error",
+      owner: null,
+      startedAt: clock,
+      settledAt: null,
+      status: "pending",
+      source: "server",
+      sessionId: "server:stream-error",
+      routeName: "streaming-page",
+    });
+    client.setQueryDefaults(["streaming-error"], {
+      meta: withP9vDevtoolsMeta(undefined, errorMeta),
+    });
+    clock = 700;
+    await expect(
+      client.fetchQuery({
+        queryKey: ["streaming-error"],
+        queryFn: async () => { throw new Error("stream failed"); },
+      }),
+    ).rejects.toThrow("stream failed");
+
+    expect(recorder.getTimings()).toHaveLength(2);
+    expect(recorder.getTimings()[1]).toMatchObject({
+      source: "server",
+      status: "error",
+      settledAt: 700,
+    });
+    recorder.stop();
+  });
 });

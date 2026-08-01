@@ -2,8 +2,9 @@ import type { FetchQueryOptions, QueryKey } from "@tanstack/react-query";
 
 /**
  * A resource is a single, reusable definition of *how* to fetch one kind of
- * server data. It is defined once and referenced from every fragment that needs
- * it. See {@link defineResource}.
+ * server data. It is defined once, read directly with `useResource`, or
+ * referenced from fragments that need stronger field contracts. See
+ * {@link defineResource}.
  */
 export interface ResourceConfig<TArg, TData, TName extends string = string> {
   /** Stable, human-readable name used in query keys, errors, and devtools. */

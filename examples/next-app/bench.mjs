@@ -28,6 +28,7 @@ async function measure(label, path) {
 const results = [];
 results.push(await measure("vanilla (waterfall)", `/vanilla/${ID}`));
 results.push(await measure("p9v (parallel)", `/p9v/${ID}`));
+results.push(await measure("p9v (streaming)", `/p9v-streaming/${ID}`));
 
 const width = Math.max(...results.map((r) => r.label.length));
 console.log(`\nFull server-render time (median of ${ROUNDS}):\n`);
@@ -38,6 +39,3 @@ for (const r of results) {
       .padStart(5)} ms`,
   );
 }
-const [vanilla, p9v] = results;
-const speedup = (vanilla.median / p9v.median).toFixed(2);
-console.log(`\n  → p9v is ${speedup}x faster (${Math.round(vanilla.median - p9v.median)}ms saved)\n`);

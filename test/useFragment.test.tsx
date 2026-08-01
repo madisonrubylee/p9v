@@ -25,6 +25,18 @@ function UserCard({ id }: { id: string }) {
 UserCard.fragments = [cardFragment] as const;
 
 describe("useFragment", () => {
+  it("keeps the public fragment-based waterfall error constructor compatible", () => {
+    const error = new P9vWaterfallError({
+      fragment: cardFragment,
+      queryKey: ["user", "missing"],
+      ownerStack: null,
+      routeScope: null,
+    });
+
+    expect(error.fragmentName).toBe("UserCard");
+    expect(error.resourceName).toBe("user");
+  });
+
   it("reads prefetched data from the cache without fetching", () => {
     const client = makeClient();
     client.setQueryData(["user", "u1"], USER_FIXTURE);

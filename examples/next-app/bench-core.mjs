@@ -1,12 +1,13 @@
 // In-process benchmark of the mechanism p9v changes: a nested-component
-// waterfall (sequential awaits) vs p9v's parallel route prefetch. Uses the real
-// p9v resource definitions + a real TanStack QueryClient (prefetchQuery +
-// dehydrate), so this exercises the actual code path — no server or ports.
+// waterfall (sequential awaits), correct manual TanStack Query prefetching, and
+// p9v's convenience layer. This makes explicit that p9v's value is enforcing
+// correctness, not outperforming correctly written parallel prefetching.
 //
 // Usage: node bench-core.mjs
 
 import { QueryClient, dehydrate } from "@tanstack/react-query";
 import { defineResource } from "@p9v/core";
+import { Prefetch, getServerQueryClient } from "@p9v/core/server";
 
 const DELAY_MS = 400;
 const ROUNDS = Number(process.env.ROUNDS ?? 7);
@@ -54,8 +55,7 @@ async function vanillaWaterfall(id) {
   return performance.now() - t;
 }
 
-// p9v: the route prefetches all three resources in parallel, then dehydrates.
-async function p9vParallel(id) {
+async function manualTanStackParallel(id) {
   const t = performance.now();
   const client = new QueryClient();
   await Promise.all(
@@ -64,6 +64,22 @@ async function p9vParallel(id) {
     ),
   );
   dehydrate(client);
+  return performance.now() - t;
+}
+
+async function p9vParallel(id) {
+  const client = getServerQueryClient();
+  client.clear();
+  const t = performance.now();
+  await Prefetch({
+    resources: [
+      userResource(id),
+      statsResource(id),
+      postsResource(id),
+    ],
+    children: null,
+    devtools: false,
+  });
   return performance.now() - t;
 }
 
@@ -76,14 +92,13 @@ async function measure(label, fn) {
 }
 
 const vanilla = await measure("vanilla (nested waterfall)", vanillaWaterfall);
+const manual = await measure("manual TanStack (parallel)", manualTanStackParallel);
 const p9v = await measure("p9v (parallel prefetch)", p9vParallel);
 
-const width = Math.max(vanilla.label.length, p9v.label.length);
+const width = Math.max(vanilla.label.length, manual.label.length, p9v.label.length);
 console.log(`\nData-layer time (median of ${ROUNDS}, ${DELAY_MS}ms/endpoint):\n`);
-for (const r of [vanilla, p9v]) {
+for (const r of [vanilla, manual, p9v]) {
   console.log(`  ${r.label.padEnd(width)}  ${Math.round(r.median).toString().padStart(5)} ms`);
 }
-console.log(
-  `\n  → p9v is ${(vanilla.median / p9v.median).toFixed(2)}x faster ` +
-    `(${Math.round(vanilla.median - p9v.median)}ms saved)\n`,
-);
+console.log("\n  → Correct manual TanStack and p9v have equivalent parallel performance.");
+console.log("    p9v adds a reusable contract and catches missing prefetches.\n");

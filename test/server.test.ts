@@ -9,6 +9,86 @@ import { P9vRouteConfigError } from "../src/errors.js";
 import type { RouteComponent } from "../src/types.js";
 
 describe("Prefetch route validation", () => {
+  it("accepts direct resources and blocks after starting them in parallel", async () => {
+    const client = getServerQueryClient();
+    client.clear();
+    const started: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const makeResource = (name: "direct-a" | "direct-b") =>
+      defineResource({
+        name,
+        key: () => [name] as const,
+        fetch: async () => {
+          started.push(name);
+          await gate;
+          return { name };
+        },
+      });
+    const first = makeResource("direct-a");
+    const second = makeResource("direct-b");
+
+    const result = Prefetch({
+      resources: [first(undefined), second(undefined)],
+      name: "direct-page",
+      children: null,
+    });
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    release();
+    const element = await result;
+    const state = (element as ReactElement<{ state: unknown }>).props.state as {
+      queries: Array<{ state: { status: string }; meta?: Record<string, any> }>;
+    };
+
+    expect(state.queries).toHaveLength(2);
+    expect(
+      state.queries.every((query) => query.state.status === "success"),
+    ).toBe(true);
+    expect(
+      state.queries.every(
+        (query) => query.meta?.__p9vDevtools?.routeName === "direct-page",
+      ),
+    ).toBe(true);
+  });
+
+  it("dehydrates pending queries without waiting in streaming mode", async () => {
+    const client = getServerQueryClient();
+    client.clear();
+    let resolveProfile!: (value: { id: string }) => void;
+    const fetchProfile = vi.fn(
+      () => new Promise<{ id: string }>((resolve) => { resolveProfile = resolve; }),
+    );
+    const profile = defineResource({
+      name: "streaming-profile",
+      key: (id: string) => ["streaming-profile", id] as const,
+      fetch: fetchProfile,
+    });
+
+    const element = await Prefetch({
+      resources: [profile("u1")],
+      mode: "streaming",
+      children: null,
+    });
+    const state = (element as ReactElement<{ state: unknown }>).props.state as {
+      queries: Array<{
+        state: { status: string };
+        promise?: Promise<unknown>;
+        meta?: Record<string, any>;
+      }>;
+    };
+
+    expect(fetchProfile).toHaveBeenCalledOnce();
+    expect(state.queries).toHaveLength(1);
+    expect(state.queries[0]?.state.status).toBe("pending");
+    expect(state.queries[0]?.promise).toBeInstanceOf(Promise);
+    expect(
+      state.queries[0]?.meta?.__p9vDevtools?.timings[0]?.status,
+    ).toBe("pending");
+
+    resolveProfile({ id: "u1" });
+    await state.queries[0]?.promise;
+  });
+
   it("fails before fetching and identifies every missing requirement", async () => {
     const fetchUser = vi.fn(async () => ({ id: "u1", name: "Ada" }));
     const userResource = defineResource({

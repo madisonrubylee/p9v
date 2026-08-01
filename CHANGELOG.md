@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- Beginner API with `useResource(resource, arg)` and direct `<Prefetch resources>` usage.
+- Blocking and RSC Suspense streaming prefetch modes.
+- `withFragments` helper for colocated strict fragment metadata.
+- Pending-query reuse and streamed server timing settlement in browser Devtools.
+
+### Changed
+
+- Cache readers now distinguish usable data, pending queries, failed queries, and genuine misses.
+- Documentation positions p9v as a TanStack Query prefetch correctness layer and compares it honestly with correct manual prefetching.
+
+### Compatibility
+
+- Existing `fragment`, `useFragment`, `Component.fragments`, `defineRouteQuery`, and `<Prefetch query params>` call sites remain supported.
+- Blocking remains the default prefetch mode and production keeps its safe fetch fallback.
+
 ## 0.2.0
 
 ### Added

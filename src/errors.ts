@@ -1,6 +1,6 @@
-import type { Fragment } from "./types.js";
 import type { RouteScope } from "./context.js";
 import type { RouteResourceRequirement } from "./routeQuery.js";
+import type { Fragment } from "./types.js";
 
 /**
  * Thrown in development before route prefetching starts when an included
@@ -38,9 +38,9 @@ export class P9vRouteConfigError extends Error {
 }
 
 /**
- * Thrown (in strict / dev mode) when `useFragment` finds no prefetched data in
- * the cache. That absence *is* a request waterfall: the component rendered
- * before its data was ready, so it would have triggered a client-side fetch.
+ * Thrown (in strict / dev mode) when a p9v read hook finds no prefetched query
+ * in the cache. That absence *is* a request waterfall: the component rendered
+ * before its request was started at the route.
  */
 export class P9vWaterfallError extends Error {
   readonly fragmentName: string;
@@ -49,23 +49,43 @@ export class P9vWaterfallError extends Error {
   readonly ownerStack: string | null;
 
   constructor(args: {
-    fragment: Fragment<any, any, any>;
     queryKey: unknown;
     ownerStack: string | null;
     routeScope: RouteScope | null;
-  }) {
-    const { fragment, queryKey, ownerStack, routeScope } = args;
-    const resourceName = fragment.resource.resourceName;
+  } & (
+    | {
+        read: {
+          kind: "fragment" | "resource";
+          name: string;
+          resourceName: string;
+        };
+      }
+    | { fragment: Fragment<any, any, any> }
+  )) {
+    const { queryKey, ownerStack, routeScope } = args;
+    const read = "read" in args
+      ? args.read
+      : {
+          kind: "fragment" as const,
+          name: args.fragment.name,
+          resourceName: args.fragment.resource.resourceName,
+        };
+    const resourceName = read.resourceName;
+    const readLabel =
+      read.kind === "fragment"
+        ? `fragment "${read.name}" (resource "${resourceName}"`
+        : `resource "${resourceName}"`;
+    const readSuffix = read.kind === "fragment" ? ")" : "";
 
     const lines = [
-      `[p9v] Waterfall detected: no prefetched data for fragment "${fragment.name}" ` +
-        `(resource "${resourceName}", key ${safeKey(queryKey)}).`,
+      `[p9v] Waterfall detected: no prefetched data for ${readLabel}, ` +
+        `key ${safeKey(queryKey)}${readSuffix}.`,
       ``,
       `This component rendered before its data was ready, which means it would`,
       `trigger a client-side fetch — a request waterfall.`,
       ``,
       `Fix one of:`,
-      `  1. Prefetch it on the route: add this resource to your defineRouteQuery({ root }).`,
+      `  1. Prefetch it on the route with <Prefetch resources={...}> or defineRouteQuery({ root }).`,
     ];
 
     if (routeScope && !routeScope.resourceNames.has(resourceName)) {
@@ -76,10 +96,17 @@ export class P9vWaterfallError extends Error {
       );
     }
 
-    lines.push(
-      `  2. If this waterfall is intentional, mark the fragment deferred:`,
-      `     fragment(resource, [...], { defer: true })`,
-    );
+    if (read.kind === "fragment") {
+      lines.push(
+        `  2. If this waterfall is intentional, mark the fragment deferred:`,
+        `     fragment(resource, [...], { defer: true })`,
+      );
+    } else {
+      lines.push(
+        `  2. If this waterfall is intentional, opt into fetching:`,
+        `     useResource(resource, arg, { defer: true })`,
+      );
+    }
 
     if (ownerStack) {
       lines.push(``, `Owner stack:`, ownerStack);
@@ -87,7 +114,7 @@ export class P9vWaterfallError extends Error {
 
     super(lines.join("\n"));
     this.name = "P9vWaterfallError";
-    this.fragmentName = fragment.name;
+    this.fragmentName = read.name;
     this.resourceName = resourceName;
     this.queryKey = queryKey;
     this.ownerStack = ownerStack;

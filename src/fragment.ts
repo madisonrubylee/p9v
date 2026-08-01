@@ -15,12 +15,14 @@ import type {
  * ```tsx
  * const UserCard_user = fragment(userResource, ["id", "name", "avatarUrl"]);
  *
- * function UserCard({ userId }: { userId: string }) {
- *   const user = useFragment(UserCard_user, userId);
- *   //    ^? { id: string; name: string; avatarUrl: string }
- *   return <div>{user.name}</div>;
- * }
- * UserCard.fragments = [UserCard_user] as const;
+ * const UserCard = withFragments(
+ *   [UserCard_user],
+ *   function UserCard({ userId }: { userId: string }) {
+ *     const user = useFragment(UserCard_user, userId);
+ *     //    ^? { id: string; name: string; avatarUrl: string }
+ *     return <div>{user.name}</div>;
+ *   },
+ * );
  * ```
  */
 export function fragment<

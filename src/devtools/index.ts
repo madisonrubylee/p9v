@@ -128,6 +128,7 @@ export class WaterfallRecorder {
   private readonly sessionId: string;
   private readonly timings: QueryTiming[] = [];
   private readonly inFlight = new Map<string, number>(); // keyHash -> timing index
+  private readonly serverInFlight = new Map<string, number[]>();
   private readonly listeners = new Set<() => void>();
   private readonly seenTimingIds = new Set<string>();
   private timingSequence = 0;
@@ -177,6 +178,7 @@ export class WaterfallRecorder {
     }
     this.timings.length = 0;
     this.inFlight.clear();
+    this.serverInFlight.clear();
     this.publishSnapshot();
     return this;
   }
@@ -191,6 +193,10 @@ export class WaterfallRecorder {
   }
 
   private onFetchStart(keyHash: string, key: QueryKey): void {
+    // A streaming server prefetch resumes from its hydrated promise. Keep it in
+    // the original server session instead of reporting a duplicate client fetch.
+    if (this.serverInFlight.has(keyHash)) return;
+
     const index = this.timings.length;
     this.timings.push({
       id: `${this.sessionId}:${++this.timingSequence}`,
@@ -210,15 +216,29 @@ export class WaterfallRecorder {
   }
 
   private onSettle(keyHash: string, status: "success" | "error"): void {
-    const index = this.inFlight.get(keyHash);
-    if (index === undefined) return;
-    const timing = this.timings[index];
-    if (timing) {
-      timing.settledAt = this.now();
-      timing.status = status;
+    let didChange = false;
+    const serverIndexes = this.serverInFlight.get(keyHash) ?? [];
+    for (const serverIndex of serverIndexes) {
+      const serverTiming = this.timings[serverIndex];
+      if (!serverTiming || serverTiming.status !== "pending") continue;
+      serverTiming.settledAt = this.now();
+      serverTiming.status = status;
+      didChange = true;
     }
-    this.inFlight.delete(keyHash);
-    this.publishSnapshot();
+    if (serverIndexes.length > 0) this.serverInFlight.delete(keyHash);
+
+    const index = this.inFlight.get(keyHash);
+    if (index !== undefined) {
+      const timing = this.timings[index];
+      if (timing) {
+        timing.settledAt = this.now();
+        timing.status = status;
+        didChange = true;
+      }
+      this.inFlight.delete(keyHash);
+    }
+
+    if (didChange) this.publishSnapshot();
   }
 
   private ingestServerTimings(metas: unknown[]): void {
@@ -230,12 +250,18 @@ export class WaterfallRecorder {
         const timingId = timing.id;
         if (!timingId || this.seenTimingIds.has(timingId)) continue;
         this.seenTimingIds.add(timingId);
+        const timingIndex = this.timings.length;
         this.timings.push({
           ...timing,
           source: "server",
           sessionId: devtoolsMeta.sessionId,
           routeName: devtoolsMeta.routeName,
         });
+        if (timing.status === "pending") {
+          const indexes = this.serverInFlight.get(timing.keyHash) ?? [];
+          indexes.push(timingIndex);
+          this.serverInFlight.set(timing.keyHash, indexes);
+        }
         didChange = true;
       }
     }

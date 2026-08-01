@@ -3,6 +3,7 @@
 
 export { defineResource } from "./resource.js";
 export { fragment } from "./fragment.js";
+export { withFragments } from "./withFragments.js";
 export { defineRouteQuery } from "./routeQuery.js";
 export { P9vRouteConfigError, P9vWaterfallError } from "./errors.js";
 export { createMask } from "./mask.js";

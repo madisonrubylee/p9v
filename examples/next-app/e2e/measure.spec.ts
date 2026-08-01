@@ -41,6 +41,22 @@ test("Devtools shows the p9v server prefetch as parallel", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("streaming resources settle under independent Suspense boundaries", async ({ page }) => {
+  await page.goto("/p9v-streaming/u1", { waitUntil: "load" });
+  await expect(page.getByText("Ada Lovelace")).toBeVisible();
+  await expect(page.getByText("Recent posts")).toBeVisible();
+  await page.getByRole("button", { name: "Open p9v Devtools" }).click();
+
+  await expect(
+    page.getByRole("option", {
+      name: "Server · streaming-user-page · 3 queries",
+    }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByText("No suspected waterfall in this session"),
+  ).toBeVisible();
+});
+
 test("Devtools shows the nested client query waterfall", async ({ page }) => {
   await page.goto("/client-waterfall/u1", { waitUntil: "load" });
   await page.getByText("Recent posts").waitFor();

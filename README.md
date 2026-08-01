@@ -6,24 +6,26 @@
 
 English | [한국어](./README.ko.md)
 
-**A Relay-style data layer for REST, TanStack Query, and the Next.js App Router.**
+**The prefetch correctness layer for TanStack Query and the Next.js App Router.**
 
-p9v keeps data requirements next to React components while prefetching every
-request in parallel at the route. Undeclared fields become type errors. When a
-route declares its components through `includes`, missing resource prefetches
-become type errors plus clear development-time errors instead of hidden
-waterfalls.
+p9v does not invent another way to fetch data. TanStack Query already prefetches
+and streams well. p9v connects route prefetches to their consumers so a missing
+prefetch becomes an actionable development error instead of a hidden request
+waterfall.
 
-- **Colocate data requirements** with reusable, type-safe fragments
-- **Prefetch in parallel** with TanStack Query and React Server Components
-- **Prevent regressions** by turning cache misses into actionable errors
+- **Start small** with `defineResource`, `useResource`, and `<Prefetch>`
+- **Stream pending queries** through React Suspense in RSC applications
+- **Prevent regressions** with exact query-key cache-miss errors
+- **Opt into stronger contracts** with fragments, masking, and route checks
 - **No GraphQL, code generation, or build plugin required**
 
 ```text
-vanilla nested fetching   1,202 ms  ██████████████████████████████
-p9v parallel prefetch       401 ms  ██████████
+naive nested fetching       1,202 ms
+manual TanStack prefetch      401 ms
+p9v prefetch                  401 ms
 
-3.00× faster · 801 ms saved
+Correct manual prefetching and p9v have equivalent runtime performance.
+p9v adds a reusable contract and catches regressions.
 ```
 
 Measured in the included [Next.js example](./examples/next-app) with three
@@ -51,46 +53,36 @@ export const userResource = defineResource({
 });
 ```
 
-Resource names must be unique within an application. p9v preserves each name as
-a string literal type to connect fragments to route prefetches.
+Resource names must be unique within an application.
 
-### 2. Declare what a component reads
+### 2. Read it in a component
 
 ```tsx
-import { fragment } from "@p9v/core";
-import { useFragment } from "@p9v/core/react";
-
-const UserCard_user = fragment(userResource, ["id", "name", "avatarUrl"]);
+import { useResource } from "@p9v/core/react";
 
 export function UserCard({ userId }: { userId: string }) {
-  const user = useFragment(UserCard_user, userId);
-
+  const user = useResource(userResource, userId);
   return <span>{user.name}</span>;
 }
-
-UserCard.fragments = [UserCard_user] as const;
 ```
 
-`user` only exposes the declared fields. Reading `user.email`, for example, is
-a TypeScript error.
+`useResource` reads the complete value from the hydrated cache. In development,
+a genuine cache miss throws `P9vWaterfallError` with the exact query key and
+responsible component instead of silently starting a request.
 
 ### 3. Prefetch at the route
 
 ```tsx
-import { defineRouteQuery } from "@p9v/core";
 import { Prefetch } from "@p9v/core/server";
-
-const userPageQuery = defineRouteQuery({
-  name: "user-page",
-  root: ({ id }: { id: string }) => [userResource(id), statsResource(id)],
-  includes: [UserCard, StatsPanel],
-});
 
 export default async function Page({ params }) {
   const { id } = await params;
 
   return (
-    <Prefetch query={userPageQuery} params={{ id }}>
+    <Prefetch
+      resources={[userResource(id), statsResource(id)]}
+      name="user-page"
+    >
       <UserCard userId={id} />
       <StatsPanel userId={id} />
     </Prefetch>
@@ -98,9 +90,50 @@ export default async function Page({ params }) {
 }
 ```
 
-Because `includes` lists `UserCard` and `StatsPanel`, TypeScript verifies that
-their fragment resources are present in `root`. In development, `<Prefetch>`
-repeats this check at runtime for JavaScript callers and code that uses `any`.
+The default `mode="blocking"` waits for every resource in parallel. To pass
+pending queries to nested Suspense boundaries instead, use streaming mode:
+
+```tsx
+<Prefetch resources={[userResource(id)]} mode="streaming">
+  <Suspense fallback={<UserCardSkeleton />}>
+    <UserCard userId={id} />
+  </Suspense>
+</Prefetch>
+```
+
+Streaming mode requires an RSC framework that can serialize Promises, such as
+the Next.js App Router. Blocking remains the portable default.
+
+## Strong contracts when you need them
+
+Fragments add field masking and compile-time route completeness without making
+them part of the beginner path:
+
+```tsx
+import { defineRouteQuery, fragment, withFragments } from "@p9v/core";
+import { useFragment } from "@p9v/core/react";
+
+const UserCard_user = fragment(userResource, ["id", "name", "avatarUrl"]);
+
+export const UserCard = withFragments(
+  [UserCard_user],
+  function UserCard({ userId }: { userId: string }) {
+    const user = useFragment(UserCard_user, userId);
+    return <span>{user.name}</span>;
+  },
+);
+
+const userPageQuery = defineRouteQuery({
+  name: "user-page",
+  root: ({ id }: { id: string }) => [userResource(id)],
+  includes: [UserCard],
+});
+```
+
+TypeScript verifies that every resource required by `includes` exists in
+`root`. `useFragment` exposes only declared fields and applies a development-only
+runtime mask. The existing `Component.fragments = [...] as const` syntax remains
+supported.
 
 `<Prefetch>` fetches the route's resources in parallel on the server, then
 dehydrates and hydrates the TanStack Query cache. `useFragment` reads that cache;
@@ -112,16 +145,16 @@ Component-level fetching is easy to maintain, but nested components can create
 serial requests. Moving every request to the route fixes performance while
 duplicating each component's data requirements.
 
-p9v keeps both benefits:
+p9v is the enforcement layer on top of the existing TanStack primitives:
 
 | Approach                  | Colocated requirements | Parallel fetching |      Prevents waterfalls      |
 | ------------------------- | :--------------------: | :---------------: | :---------------------------: |
 | Fetch inside components   |          Yes           |        No         |              No               |
-| Manual route prefetching  |           No           |        Yes        |              No               |
+| Manual TanStack prefetch  |           No           |        Yes        |              No               |
 | Waterfall detection tools |          Yes           |        No         |   No — warns after the fact   |
 | **p9v**                   |        **Yes**         |      **Yes**      | **Yes, for declared routes** |
 
-The model follows three rules:
+The optional strict-contract model follows three rules:
 
 1. **Declare** fields with `fragment(resource, fields)`.
 2. **Mask** component data to those fields.
@@ -192,10 +225,12 @@ in CI.
 | API                          | Purpose                                        |
 | ---------------------------- | ---------------------------------------------- |
 | `defineResource(...)`        | Define a fetcher, query key, and cache options |
+| `useResource(resource, arg)` | Read a complete prefetched resource            |
 | `fragment(resource, fields)` | Declare and type-mask a component's fields     |
+| `withFragments(...)`         | Attach fragment metadata without a later assignment |
 | `defineRouteQuery(...)`      | List route resources and included components   |
 | `useFragment(fragment, arg)` | Reactively read prefetched, masked cache data  |
-| `<Prefetch query params>`    | Prefetch, dehydrate, and hydrate route data    |
+| `<Prefetch ...>`             | Block on or stream direct/route resources      |
 | `WaterfallRecorder`          | Record and analyze query timing in development |
 | `P9vDevtools`                | Inspect server/client timings in the browser   |
 | `P9vRouteConfigError`        | Describe missing route resource prefetches     |
@@ -204,8 +239,8 @@ in CI.
 
 | Import               | Environment | Main exports                                       |
 | -------------------- | ----------- | -------------------------------------------------- |
-| `@p9v/core`          | Server-safe | `defineResource`, `fragment`, `defineRouteQuery`   |
-| `@p9v/core/react`    | Client      | `useFragment`, `P9vProvider`, `RouteQueryProvider` |
+| `@p9v/core`          | Server-safe | `defineResource`, `fragment`, `withFragments`, `defineRouteQuery` |
+| `@p9v/core/react`    | Client      | `useResource`, `useFragment`, `P9vProvider`, `RouteQueryProvider` |
 | `@p9v/core/server`   | Server      | `Prefetch`, `getServerQueryClient`                 |
 | `@p9v/core/devtools` | Any         | Recorder, analysis, and reporting utilities        |
 | `@p9v/core/devtools/react` | Client | Browser `P9vDevtools` panel                         |
@@ -217,9 +252,10 @@ an included component's resource is absent from `root`. A cache miss for an
 exact query key throws `P9vWaterfallError`; on React 19.1+, that error also
 identifies the responsible component through owner stacks.
 
-Production defaults to a safe fetch fallback. To intentionally defer a request,
-set `{ defer: true }` on its fragment. You can override strict behavior for a
-subtree with `<P9vProvider strict={...}>`.
+Production defaults to a safe fetch-and-suspend fallback. To intentionally defer
+a request in development, pass `{ defer: true }` to `useResource` or its
+fragment. You can override strict behavior for a subtree with
+`<P9vProvider strict={...}>`.
 
 Field masking uses a development-only `Proxy`; it adds no production runtime
 overhead.

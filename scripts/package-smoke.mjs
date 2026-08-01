@@ -126,12 +126,12 @@ try {
   writeFileSync(
     typeSmokeFile,
     [
-      'import { defineResource, defineRouteQuery, P9vRouteConfigError, type RouteQuery } from "@p9v/core";',
-      'import { useFragment } from "@p9v/core/react";',
+      'import { defineResource, defineRouteQuery, withFragments, P9vRouteConfigError, type RouteQuery } from "@p9v/core";',
+      'import { useFragment, useResource } from "@p9v/core/react";',
       'import { Prefetch } from "@p9v/core/server";',
       'import { WaterfallRecorder } from "@p9v/core/devtools";',
       'import { P9vDevtools } from "@p9v/core/devtools/react";',
-      "void defineResource; void defineRouteQuery; void P9vRouteConfigError; void useFragment;",
+      "void defineResource; void defineRouteQuery; void withFragments; void P9vRouteConfigError; void useFragment; void useResource;",
       "void Prefetch; void WaterfallRecorder; void P9vDevtools;",
       "type SmokeRoute = RouteQuery<{ id: string }>;",
       "const route = null as unknown as SmokeRoute; void route;",
